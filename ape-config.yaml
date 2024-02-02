@@ -1,0 +1,26 @@
+name: marginal-simulations-2024-02
+
+plugins:
+  - name: alchemy
+    version: 0.7.1
+  - name: foundry
+    version: 0.7.3
+  - name: notebook
+    version: 0.7.0
+  - name: etherscan
+    version: 0.7.0
+  - name: solidity
+    version: 0.7.1
+
+default_ecosystem: ethereum
+
+ethereum:
+  default_network: mainnet-fork
+  mainnet_fork:
+    default_provider: foundry
+
+foundry:
+  fork:
+    ethereum:
+      mainnet:
+        upstream_provider: alchemy
