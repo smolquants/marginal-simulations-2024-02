@@ -30,7 +30,7 @@ dependencies = [
   "matplotlib",
   "scipy",
   "notebook",
-  # TODO: "backtest-ape" for eth-ape >= 0.7.0
+  "backtest-ape==0.1.0a16",
 ]
 
 [project.urls]
