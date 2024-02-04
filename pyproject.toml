@@ -24,13 +24,13 @@ classifiers = [
   "Programming Language :: Python :: Implementation :: PyPy",
 ]
 dependencies = [
-  "eth-ape==0.7.7",
+  "eth-ape==0.6.26",
   "pandas",
   "numpy",
   "matplotlib",
   "scipy",
   "notebook",
-  "backtest-ape==0.1.0a16",
+  "backtest-ape==0.1.0a15",
 ]
 
 [project.urls]

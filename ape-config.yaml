@@ -2,15 +2,15 @@ name: marginal-simulations-2024-02
 
 plugins:
   - name: alchemy
-    version: 0.7.1
-  - name: foundry
-    version: 0.7.3
-  - name: notebook
-    version: 0.7.0
+    version: 0.6.2
   - name: etherscan
-    version: 0.7.0
+    version: 0.6.11
   - name: solidity
-    version: 0.7.1
+    version: 0.6.9
+  - name: foundry
+    version: 0.6.12
+  - name: notebook
+    version: 0.6.0
 
 default_ecosystem: ethereum
 
@@ -24,3 +24,33 @@ foundry:
     ethereum:
       mainnet:
         upstream_provider: alchemy
+
+dependencies:
+  - name: OpenZeppelin
+    github: OpenZeppelin/openzeppelin-contracts
+    version: 4.8.3
+  - name: MarginalV1Core
+    github: MarginalProtocol/v1-core
+    ref: v1.0.0-rc.4
+  - name: MarginalV1Periphery
+    github: MarginalProtocol/v1-periphery
+    ref: v1.0.0-beta.10
+  - name: UniswapV3Core
+    github: Uniswap/v3-core
+    ref: 0.8
+  - name: UniswapV3Periphery
+    github: Uniswap/v3-periphery
+    ref: 0.8
+  - name: BacktestApe
+    github: smolquants/backtest-ape
+    ref: "v0.1.0-alpha.15"
+
+solidity:
+  via_ir: true
+  import_remapping:
+    - "@openzeppelin/contracts=OpenZeppelin/v4.8.3"
+    - "@marginal/v1-core/contracts=MarginalV1Core/v1.0.0-rc.4"
+    - "@marginal/v1-periphery/contracts=MarginalV1Periphery/v1.0.0-beta.10"
+    - "@uniswap/v3-core/contracts=UniswapV3Core/v0.8"
+    - "@uniswap/v3-periphery/contracts=UniswapV3Periphery/v0.8"
+    - "@smolquants/backtest-ape/contracts=BacktestApe/v0.1.0-alpha.15"
