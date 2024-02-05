@@ -45,6 +45,10 @@ path = "src/marginal_simulations_2024_02/__about__.py"
 dependencies = [
   "coverage[toml]>=6.5",
   "pytest",
+  "black",
+  "flake8",
+  "mypy",
+  "isort",
 ]
 [tool.hatch.envs.default.scripts]
 test = "pytest {args:tests}"
