@@ -6,7 +6,12 @@ from ape import Contract
 from backtest_ape.base import BaseRunner
 from backtest_ape.setup import deploy_mock_erc20
 
-from marginal_simulations_2024_02.runners.setup import deploy_mock_univ3_pool, deploy_mock_mrglv1_pool
+from marginal_simulations_2024_02.runners.setup import (
+    deploy_mock_univ3_factory,
+    create_mock_univ3_pool,
+    deploy_mock_mrglv1_factory,
+    create_mock_mrglv1_pool,
+)
 
 
 class BaseMarginalV1Runner(BaseRunner):
@@ -47,16 +52,28 @@ class BaseMarginalV1Runner(BaseRunner):
             for i, token in enumerate(self._refs["tokens"])
         ]
 
-        # deploy the mock univ3 pool
+        # deploy the mock univ3 factory and pool
         ref_univ3_pool = self._refs["univ3_pool"]
         fee = ref_univ3_pool.fee()
-        mock_univ3_pool = deploy_mock_univ3_pool(mock_tokens, fee, self.acc)
+        sqrt_price_x96 = ref_univ3_pool.slot0().sqrtPriceX96
 
-        # deploy the mock mrglv1 pool
-        mock_mrglv1_pool = deploy_mock_mrglv1_pool(mock_tokens, self.maintenance, mock_univ3_pool, self.acc)
+        mock_univ3_factory = deploy_mock_univ3_factory(self.acc)
+        mock_univ3_pool = create_mock_univ3_pool(mock_univ3_factory, mock_tokens, fee, sqrt_price_x96, self.acc)
+
+        # deploy the mock mrglv1 factory and pool
+        mock_mrglv1_factory = deploy_mock_mrglv1_factory(
+            mock_univ3_factory,
+            0,  # cardinality min not relevant for backtests
+            self.acc,
+        )
+        mock_mrglv1_pool = create_mock_mrglv1_pool(
+            mock_mrglv1_factory, mock_tokens, self.maintenance, mock_univ3_pool, self.acc
+        )
 
         self._mocks = {
             "tokens": mock_tokens,
+            "univ3_factory": mock_univ3_factory,
             "univ3_pool": mock_univ3_pool,
+            "mrglv1_factory": mock_mrglv1_factory,
             "mrglv1_pool": mock_mrglv1_pool,
         }
