@@ -55,10 +55,8 @@ class BaseMarginalV1Runner(BaseRunner):
         # deploy the mock univ3 factory and pool
         ref_univ3_pool = self._refs["univ3_pool"]
         fee = ref_univ3_pool.fee()
-        sqrt_price_x96 = ref_univ3_pool.slot0().sqrtPriceX96
-
         mock_univ3_factory = deploy_mock_univ3_factory(self.acc)
-        mock_univ3_pool = create_mock_univ3_pool(mock_univ3_factory, mock_tokens, fee, sqrt_price_x96, self.acc)
+        mock_univ3_pool = create_mock_univ3_pool(mock_univ3_factory, mock_tokens, fee, self.acc)
 
         # deploy the mock mrglv1 factory and pool
         mock_mrglv1_factory = deploy_mock_mrglv1_factory(

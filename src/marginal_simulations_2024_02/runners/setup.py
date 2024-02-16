@@ -19,7 +19,6 @@ def create_mock_univ3_pool(
     univ3_factory: ContractInstance,
     tokens: List[ContractInstance],
     fee: int,
-    sqrt_price_x96: int,
     acc: AccountAPI,
 ) -> ContractInstance:
     """
@@ -33,9 +32,6 @@ def create_mock_univ3_pool(
     univ3_factory.createPool(token0.address, token1.address, fee, sender=acc)
     univ3_pool_addr = univ3_factory.getPool(token0.address, token1.address, fee)
     univ3_pool = project.MockUniswapV3Pool.at(univ3_pool_addr)
-
-    # initialize the pool prior to returning
-    univ3_pool.initialize(sqrt_price_x96, sender=acc)
     return univ3_pool
 
 
