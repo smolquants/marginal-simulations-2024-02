@@ -1,9 +1,14 @@
-from typing import ClassVar, Mapping, Optional
+import os
+import pandas as pd
+
+from typing import ClassVar, List, Mapping, Optional
 
 from ape import chain
 from backtest_ape.utils import get_block_identifier
 
 from marginal_simulations_2024_02.runners.base import BaseMarginalV1Runner
+from marginal_simulations_2024_02.constants import MINIMUM_LIQUIDITY
+from marginal_simulations_2024_02.utils import get_mrglv1_amounts_for_liquidity
 
 
 class MarginalV1LPRunner(BaseMarginalV1Runner):
@@ -19,7 +24,7 @@ class MarginalV1LPRunner(BaseMarginalV1Runner):
         """
         super().setup(mocking=mocking)
         if not mocking:
-            return
+            raise Exception("Only mocking supported")
 
         # deploy the backtester
         pool_addr = self._mocks["mrglv1_pool"].address
@@ -110,3 +115,106 @@ class MarginalV1LPRunner(BaseMarginalV1Runner):
         ]
         values = [0 for _ in range(6)]
         self.backtester.multicall(targets, datas, values, sender=self.acc)
+
+    def set_mocks_state(self, state: Mapping):
+        """
+        Sets the state of mocks.
+
+        Args:
+            state (Mapping): The new state of mocks.
+        """
+        # update mock univ3 pool for state attrs
+        mock_univ3_pool = self._mocks["pool"]
+        mock_univ3_pool.setSlot0(state["slot0"])
+        mock_univ3_pool.setLiquidity(state["liquidity"])
+        mock_univ3_pool.setFeeGrowthGlobalX128(state["fee_growth_global0_x128"], state["fee_growth_global1_x128"])
+        for i in range(2):
+            mock_univ3_pool.pushObservation(*state[f"observation{i}"])
+
+    def init_strategy(self):
+        """
+        Initializes the strategy being backtested through backtester contract
+        at the given block.
+        """
+        mock_mrglv1_initializer = self._mocks["mrglv1_initializer"]
+        mock_univ3_pool = self._mocks["univ3_pool"]
+        mock_tokens = self._mocks["tokens"]
+        ecosystem = chain.provider.network.ecosystem
+
+        # mint the LP position via the mrglv1 initializer
+        sqrt_price_x96_desired = mock_univ3_pool.slot0().sqrtPriceX96
+        amount0_desired, amount1_desired = get_mrglv1_amounts_for_liquidity(
+            sqrt_price_x96_desired,
+            self.liquidity,
+        )
+        initialize_params = (
+            mock_tokens[0],  # token0
+            mock_tokens[1],  # token1
+            self.maintenance,
+            mock_univ3_pool.fee(),
+            self.backtester.address,  # recipient
+            sqrt_price_x96_desired,
+            0,
+            MINIMUM_LIQUIDITY**2,  # liquidity to burn
+            2**255 - 1,
+            2**255 - 1,
+            amount0_desired,
+            amount1_desired,
+            0,
+            0,
+            2**256 - 1,
+        )
+
+        # execute through backtester
+        self.backtester.execute(
+            mock_mrglv1_initializer.address,
+            ecosystem.encode_transaction(
+                mock_mrglv1_initializer.address,
+                mock_mrglv1_initializer.createAndInitializePoolIfNecessary.abis[0],
+                initialize_params,
+            ).data,
+            0,
+            sender=self.acc,
+        )
+
+    def update_strategy(self, number: int, state: Mapping):
+        """
+        Updates the strategy being backtested through backtester contract.
+
+        NOTE: Passing means passive LP.
+
+        Args:
+            number (int): The block number.
+            state (Mapping): The state of references at block number.
+        """
+        # TODO: implement
+        pass
+
+    def record(self, path: str, number: int, state: Mapping, values: List[int]):
+        """
+        Records the value and possibly some state at the given block.
+
+        Args:
+            path (str): The path to the csv file to write the record to.
+            number (int): The block number.
+            state (Mapping): The state of references at block number.
+            values (List[int]): The value of the backtester for the state.
+        """
+        data = {"number": number}
+        for i, value in enumerate(values):
+            data[f"values{i}"] = value
+
+        data.update(
+            {
+                "sqrtPriceX96": state["slot0"].sqrtPriceX96,
+                "liquidity": state["liquidity"],
+                "feeGrowthGlobal0X128": state["fee_growth_global0_x128"],
+                "feeGrowthGlobal1X128": state["fee_growth_global1_x128"],
+                "observation0": state["observation0"],
+                "observation1": state["observation1"],
+            }
+        )
+
+        header = not os.path.exists(path)
+        df = pd.DataFrame(data={k: [v] for k, v in data.items()})
+        df.to_csv(path, index=False, mode="a", header=header)

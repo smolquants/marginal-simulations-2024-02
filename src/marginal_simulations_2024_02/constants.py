@@ -1,0 +1,2 @@
+# mrglv1
+MINIMUM_LIQUIDITY = 10000
