@@ -75,3 +75,28 @@ def create_mock_mrglv1_pool(
     mrglv1_core = project.dependencies['MarginalV1Core']['v1.0.0-rc.4']
     pool = mrglv1_core.MarginalV1Pool.at(pool_addr)
     return pool
+
+
+def deploy_mock_mrglv1_initializer(
+    factory: ContractInstance,
+    WETH9: ContractInstance,
+    acc: AccountAPI,
+) -> ContractInstance:
+    """
+    Deploys the mock Marginal V1 pool initializer.
+
+    Returns:
+        :class:`ape.contracts.ContractInstance`
+    """
+    mrglv1_periphery = project.dependencies['MarginalV1Periphery']['v1.0.0-beta.10']
+    return mrglv1_periphery.PoolInitializer.deploy(factory.address, WETH9.address, sender=acc)
+
+
+def deploy_mock_callee(acc: AccountAPI) -> ContractInstance:
+    """
+    Deploys the mock callee for interacting with Marginal v1 and Uniswap v3.
+
+    Returns:
+        :class:`ape.contracts.ContractInstance`
+    """
+    return project.Callee.deploy(sender=acc)

@@ -5,6 +5,7 @@ from typing import ClassVar, List, Mapping, Optional
 
 from ape import chain
 from backtest_ape.utils import get_block_identifier
+from pydantic import validator
 
 from marginal_simulations_2024_02.runners.base import BaseMarginalV1Runner
 from marginal_simulations_2024_02.constants import MINIMUM_LIQUIDITY
@@ -12,8 +13,52 @@ from marginal_simulations_2024_02.utils import get_mrglv1_amounts_for_liquidity
 
 
 class MarginalV1LPRunner(BaseMarginalV1Runner):
-    liquidity: int = 0
+    liquidity: int = 0  # initial liquidity deployed by runner
+    utilization: float = 0  # = pool.liquidityLocked / pool.totalLiquidity
+    skew: float = 0  # [-1, 1]: -1 is all utilization short, +1 is all long
+    leverage: float = 1.1  # average leverage of positions on pool
+
     _backtester_name: ClassVar[str] = "MarginalV1LPBacktest"
+    _position_ids: List[int] = []  # position IDs for outstanding positions on mrglv1 pool (only two of them)
+
+    @validator("utilization")
+    def utilization_between_zero_and_one(cls, v, **kwargs):
+        if v < 0 or v > 1:
+            raise ValueError("utilization must be between 0 and 1")
+
+    @validator("skew")
+    def skew_mag_less_than_one(cls, v, **kwargs):
+        if abs(v) > 1:
+            raise ValueError("skew must be between -1 and 1")
+
+    def _calculate_position_liquidity_deltas(self) -> (int, int):
+        """
+        Calculates position liquidity deltas to take for
+        zeroForOne = true and zeroForOne = false values.
+
+        Skew given by:
+            S = (a - b) / (a + b)
+
+        Utilization given by:
+            U = (a + b) / (a + b + pool.liquidity)
+
+        where
+            a + b = pool.liquidityLocked
+            a = position.liquidityLocked (zeroForOne = true)
+            b = position.liquidityLocked (zeroForOne = false)
+
+        Returns:
+            a (int): The liquidity delta for the zeroForOne = true position
+            b (int): The liquidity delta for the zeroForOne = false position
+        """
+        mock_mrglv1_pool = self._mocks["mrglv1_pool"]
+        liquidity = mock_mrglv1_pool.state().liquidity
+        liquidity_locked = mock_mrglv1_pool.liquidityLocked()
+        assert liquidity_locked == 0, "positions already exist on pool"
+
+        liquidity_delta_01 = (liquidity * self.utilization * (1 + self.skew)) // 2
+        liquidity_delta_10 = (liquidity * self.utilization * (1 - self.skew)) // 2
+        return (liquidity_delta_01, liquidity_delta_10)
 
     def setup(self, mocking: bool = True):
         """
@@ -187,7 +232,6 @@ class MarginalV1LPRunner(BaseMarginalV1Runner):
             number (int): The block number.
             state (Mapping): The state of references at block number.
         """
-        # TODO: implement
         pass
 
     def record(self, path: str, number: int, state: Mapping, values: List[int]):

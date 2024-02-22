@@ -11,13 +11,15 @@ from marginal_simulations_2024_02.runners.setup import (
     create_mock_univ3_pool,
     deploy_mock_mrglv1_factory,
     create_mock_mrglv1_pool,
+    deploy_mock_mrglv1_initializer,
+    deploy_mock_callee,
 )
 
 
 class BaseMarginalV1Runner(BaseRunner):
     maintenance: int = 250000  # min maintenance of the Marginal pool used in backtests
 
-    _ref_keys: ClassVar[List[str]] = ["univ3_pool"]
+    _ref_keys: ClassVar[List[str]] = ["univ3_pool", "WETH9"]
 
     def __init__(self, **data: Any):
         """
@@ -68,10 +70,16 @@ class BaseMarginalV1Runner(BaseRunner):
             mock_mrglv1_factory, mock_tokens, self.maintenance, mock_univ3_pool, self.acc
         )
 
+        # deploy utility contracts to interact with mocks: initializer, test callee
+        mock_callee = deploy_mock_callee(self.acc)
+        mock_initializer = deploy_mock_mrglv1_initializer(mock_mrglv1_factory, self._refs["WETH9"], self.acc)
+
         self._mocks = {
             "tokens": mock_tokens,
             "univ3_factory": mock_univ3_factory,
             "univ3_pool": mock_univ3_pool,
             "mrglv1_factory": mock_mrglv1_factory,
             "mrglv1_pool": mock_mrglv1_pool,
+            "mrglv1_initializer": mock_initializer,
+            "callee": mock_callee,
         }
