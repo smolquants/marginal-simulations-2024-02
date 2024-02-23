@@ -1,3 +1,4 @@
+import click
 import os
 import pandas as pd
 
@@ -9,7 +10,10 @@ from pydantic import validator
 
 from marginal_simulations_2024_02.runners.base import BaseMarginalV1Runner
 from marginal_simulations_2024_02.constants import MINIMUM_LIQUIDITY
-from marginal_simulations_2024_02.utils import get_mrglv1_amounts_for_liquidity
+from marginal_simulations_2024_02.utils import (
+    get_mrglv1_amounts_for_liquidity,
+    get_mrglv1_size_from_liquidity_delta,
+)
 
 
 class MarginalV1LPRunner(BaseMarginalV1Runner):
@@ -17,9 +21,22 @@ class MarginalV1LPRunner(BaseMarginalV1Runner):
     utilization: float = 0  # = pool.liquidityLocked / pool.totalLiquidity
     skew: float = 0  # [-1, 1]: -1 is all utilization short, +1 is all long
     leverage: float = 1.1  # average leverage of positions on pool
+    blocks_held: int = 7200  # average number of blocks positions held
+    sqrt_price_tol: float = 0.0025  # sqrt price diff above which should arb pools
 
     _backtester_name: ClassVar[str] = "MarginalV1LPBacktest"
-    _position_ids: List[int] = []  # position IDs for outstanding positions on mrglv1 pool (only two of them)
+
+    _token_ids: List[int] = [-1, -1]  # token IDs for outstanding positions on mrglv1 pool (only two of them)
+    _blocks_settle: int = [-1, -1]  # future blocks to settle positions at
+    _positions_liquidated_cumulative: List[int] = [0, 0]
+    _positions_settled_cumulative: List[int] = [0, 0]
+    _sizes_liquidated_cumulative: List[int] = [0, 0]
+    _sizes_settled_cumulative: List[int] = [0, 0]
+
+    @validator("leverage")
+    def leverage_greater_than_one(cls, v, **kwargs):
+        if v <= 1:
+            raise ValueError("leverage must be greater than 1")
 
     @validator("utilization")
     def utilization_between_zero_and_one(cls, v, **kwargs):
@@ -54,11 +71,51 @@ class MarginalV1LPRunner(BaseMarginalV1Runner):
         mock_mrglv1_pool = self._mocks["mrglv1_pool"]
         liquidity = mock_mrglv1_pool.state().liquidity
         liquidity_locked = mock_mrglv1_pool.liquidityLocked()
-        assert liquidity_locked == 0, "positions already exist on pool"
+        total_liquidity = liquidity + liquidity_locked
 
-        liquidity_delta_01 = (liquidity * self.utilization * (1 + self.skew)) // 2
-        liquidity_delta_10 = (liquidity * self.utilization * (1 - self.skew)) // 2
+        liquidity_delta_01 = (total_liquidity * self.utilization * (1 + self.skew)) // 2
+        liquidity_delta_10 = (total_liquidity * self.utilization * (1 - self.skew)) // 2
         return (liquidity_delta_01, liquidity_delta_10)
+
+    def _arb_pools(self):
+        """
+        Arbs price differences between Marginal v1 pool and Uniswap v3 pool
+        if below tolerance.
+        """
+        mock_tokens = self._mocks["tokens"]
+        mock_univ3_pool = self._mocks["univ3_pool"]
+        mock_mrglv1_pool = self._mocks["mrglv1_pool"]
+        mock_mrglv1_arbitrageur = self._mocks["mrglv1_arbitrageur"]
+        ref_WETH9 = self._refs["WETH9"]
+
+        univ3_sqrt_price_x96 = mock_univ3_pool.slot0().sqrtPriceX96
+        mrglv1_sqrt_price_x96 = mock_mrglv1_pool.state().sqrtPriceX96
+        rel_sqrt_price_diff = univ3_sqrt_price_x96 / mrglv1_sqrt_price_x96 - 1
+
+        click.echo(f"Uniswap v3 sqrt price X96: {univ3_sqrt_price_x96}")
+        click.echo(f"Marginal v1 sqrt price X96: {mrglv1_sqrt_price_x96}")
+        click.echo(f"Relative difference in sqrt price X96 values: {rel_sqrt_price_diff}")
+
+        if abs(rel_sqrt_price_diff) <= self.sqrt_price_tol:
+            return
+
+        token_out = ref_WETH9.address if ref_WETH9.address in mock_tokens else mock_tokens[1].address
+        sweep_as_eth = ref_WETH9.address == token_out
+        execute_params = (
+            mock_tokens[0],
+            mock_tokens[1],
+            self.maintenance,
+            mock_univ3_pool.address,
+            self.acc.address,
+            token_out,
+            0,
+            0,
+            0,
+            2**256 - 1,
+            sweep_as_eth,
+        )
+        click.echo("Arbitraging Marginal v1 and Uniswap v3 pools ...")
+        mock_mrglv1_arbitrageur.execute(execute_params, sender=self.acc)
 
     def setup(self, mocking: bool = True):
         """
@@ -120,14 +177,19 @@ class MarginalV1LPRunner(BaseMarginalV1Runner):
             state (Mapping): The init state of mocks at block number.
         """
         mock_univ3_pool = self._mocks["univ3_pool"]
+        mock_mrglv1_initializer = self._mocks["mrglv1_initializer"]
+        mock_mrglv1_manager = self._mocks["mrglv1_manager"]
+        mock_mrglv1_router = self._mocks["mrglv1_router"]
         mock_tokens = self._mocks["tokens"]
         ecosystem = chain.provider.network.ecosystem
 
         # set the current state of univ3 and mrglv1 pools
         self.set_mocks_state(state)
 
-        # mint tokens to near inf tokens to univ3 pool so swaps work
-        # and to backtester to add liquidity to mrglv1 pool
+        # mint tokens to near inf tokens to:
+        #  - univ3 pool so swaps work
+        #  - backtester to add liquidity to mrglv1 pool
+        #  - self.acc to take out positions on mrglv1 pool
         targets = [mock_token.address for mock_token in mock_tokens]
         targets += targets  # given 3 iterations to multicall
         targets += targets
@@ -153,13 +215,26 @@ class MarginalV1LPRunner(BaseMarginalV1Runner):
             ecosystem.encode_transaction(
                 mock_token.address,
                 mock_token.approve.abis[0],
-                mock_univ3_pool.address,
+                mock_mrglv1_initializer.address,
                 2**256 - 1,
             ).data
             for i, mock_token in enumerate(mock_tokens)
         ]
-        values = [0 for _ in range(6)]
+        datas += [
+            ecosystem.encode_transaction(
+                mock_token.address,
+                mock_token.approve.abis[0],
+                mock_mrglv1_router.address,
+                2**256 - 1,
+            ).data
+            for i, mock_token in enumerate(mock_tokens)
+        ]
+        values = [0 for _ in range(8)]
         self.backtester.multicall(targets, datas, values, sender=self.acc)
+
+        for mock_token in mock_tokens:
+            mock_token.mint(self.acc.address, 2**128 - 1, sender=self.acc)
+            mock_token.approve(mock_mrglv1_manager.address, 2**256 - 1, sender=self.acc)
 
     def set_mocks_state(self, state: Mapping):
         """
@@ -232,7 +307,94 @@ class MarginalV1LPRunner(BaseMarginalV1Runner):
             number (int): The block number.
             state (Mapping): The state of references at block number.
         """
-        pass
+        mock_tokens = self._mocks["tokens"]
+        mock_univ3_pool = self._mocks["univ3_pool"]
+        mock_mrglv1_manager = self._mocks["mrglv1_manager"]
+        mock_mrglv1_pool = self._mocks["mrglv1_pool"]
+
+        # TODO: simulate swaps for fee volume
+
+        # arbitrage univ3 and mrglv1 pools to close price gap
+        self._arb_pools()
+
+        # liquidate or settle outstanding positions
+        for i, token_id in enumerate(self._token_ids.copy()):
+            if token_id == -1:
+                # no position there
+                continue
+
+            # get position values
+            position = mock_mrglv1_manager.positions(token_id)
+            click.echo(f"Position status of tokenID {token_id}: {position}")
+
+            # liquidate position if not safe
+            if not position.safe:
+                click.echo(f"Liquidating position with tokenID {token_id} ...")
+                mock_mrglv1_pool.liquidate(
+                    self.acc.address, mock_mrglv1_manager.address, position.positionId, sender=self.acc
+                )
+                self._token_ids[i] = -1
+                self._positions_liquidated_cumulative[i] += 1
+                self._sizes_liquidated_cumulative[i] += position.size
+            # otherwise settle position if enough blocks have passed
+            elif number >= self._blocks_settle[i]:
+                click.echo(f"Settling position with tokenID {token_id} ...")
+                burn_params = (
+                    mock_tokens[0],
+                    mock_tokens[1],
+                    self.maintenance,
+                    mock_univ3_pool.address,
+                    token_id,
+                    self.acc.address,
+                    2**256 - 1,
+                )
+                mock_mrglv1_manager.burn(burn_params, sender=self.acc)
+                self._token_ids[i] = -1
+                self._positions_settled_cumulative[i] += 1
+                self._sizes_settled_cumulative[i] += position.size
+
+        # open any new positions if don't have existing long or short
+        for i, token_id in enumerate(self._token_ids.copy()):
+            if token_id != -1:
+                # position already there
+                continue
+
+            liquidity_delta = self._calculate_position_liquidity_deltas()[i]
+            mrglv1_state = mock_mrglv1_pool.state()
+            zero_for_one = i == 0
+            size_desired = get_mrglv1_size_from_liquidity_delta(
+                mrglv1_state.liquidity,
+                mrglv1_state.sqrtPriceX96,
+                liquidity_delta,
+                zero_for_one,
+                self.maintenance,
+            )
+            margin = size_desired / (self.leverage - 1)
+            mint_params = (
+                mock_tokens[0],
+                mock_tokens[1],
+                self.maintenance,
+                mock_univ3_pool.address,
+                zero_for_one,
+                size_desired,
+                0,
+                0,
+                0,
+                0,
+                margin,
+                self.acc.address,
+                2**256 - 1,
+            )
+            receipt = mock_mrglv1_manager.mint(mint_params, sender=self.acc, value=int(1e18))  # excess ETH in case
+            next_token_id = receipt.decode_logs(mock_mrglv1_manager.Mint)[0].tokenId
+            next_position = mock_mrglv1_manager.positions(next_token_id)
+
+            self._token_ids[i] = next_token_id
+            self._blocks_settle[i] = number + self.blocks_held
+            click.echo(f"Opened new position with tokenID {next_token_id}: {next_position}")
+
+        # arb pools again given potential positions opened if arb there
+        self._arb_pools()
 
     def record(self, path: str, number: int, state: Mapping, values: List[int]):
         """
@@ -258,6 +420,19 @@ class MarginalV1LPRunner(BaseMarginalV1Runner):
                 "univ3_observation1": state["observation1"],
             }
         )
+
+        # all lists so unfold
+        attr_names = [
+            "_token_ids",
+            "_positions_liquidated_cumulative",
+            "_positions_settled_cumulative",
+            "_sizes_liquidated_cumulative",
+            "_sizes_settled_cumulative",
+        ]
+        for name in attr_names:
+            cum_list = getattr(self, name)
+            for i, cum_val in enumerate(cum_list):
+                data[f"{name}{i}"] = cum_val
 
         header = not os.path.exists(path)
         df = pd.DataFrame(data={k: [v] for k, v in data.items()})

@@ -12,14 +12,16 @@ from marginal_simulations_2024_02.runners.setup import (
     deploy_mock_mrglv1_factory,
     create_mock_mrglv1_pool,
     deploy_mock_mrglv1_initializer,
-    deploy_mock_callee,
+    deploy_mock_mrglv1_router,
+    deploy_mock_mrglv1_manager,
+    deploy_mock_mrglv1_arbitrageur,
 )
 
 
 class BaseMarginalV1Runner(BaseRunner):
     maintenance: int = 250000  # min maintenance of the Marginal pool used in backtests
 
-    _ref_keys: ClassVar[List[str]] = ["univ3_pool", "WETH9"]
+    _ref_keys: ClassVar[List[str]] = ["WETH9", "univ3_pool"]
 
     def __init__(self, **data: Any):
         """
@@ -70,9 +72,12 @@ class BaseMarginalV1Runner(BaseRunner):
             mock_mrglv1_factory, mock_tokens, self.maintenance, mock_univ3_pool, self.acc
         )
 
-        # deploy utility contracts to interact with mocks: initializer, test callee
-        mock_callee = deploy_mock_callee(self.acc)
-        mock_initializer = deploy_mock_mrglv1_initializer(mock_mrglv1_factory, self._refs["WETH9"], self.acc)
+        # deploy mrglv1 periphery contracts to interact with mocks
+        ref_WETH9 = self._refs["WETH9"]
+        mock_initializer = deploy_mock_mrglv1_initializer(mock_mrglv1_factory, ref_WETH9, self.acc)
+        mock_router = deploy_mock_mrglv1_router(mock_mrglv1_factory, ref_WETH9, self.acc)
+        mock_manager = deploy_mock_mrglv1_manager(mock_mrglv1_factory, ref_WETH9, self.acc)
+        mock_arbitrageur = deploy_mock_mrglv1_arbitrageur(mock_mrglv1_factory, ref_WETH9, self.acc)
 
         self._mocks = {
             "tokens": mock_tokens,
@@ -81,5 +86,7 @@ class BaseMarginalV1Runner(BaseRunner):
             "mrglv1_factory": mock_mrglv1_factory,
             "mrglv1_pool": mock_mrglv1_pool,
             "mrglv1_initializer": mock_initializer,
-            "callee": mock_callee,
+            "mrglv1_router": mock_router,
+            "mrglv1_manager": mock_manager,
+            "mrglv1_arbitrageur": mock_arbitrageur,
         }

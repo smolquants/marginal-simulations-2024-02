@@ -88,15 +88,50 @@ def deploy_mock_mrglv1_initializer(
     Returns:
         :class:`ape.contracts.ContractInstance`
     """
-    mrglv1_periphery = project.dependencies['MarginalV1Periphery']['v1.0.0-beta.10']
+    mrglv1_periphery = project.dependencies['MarginalV1Periphery']['v1.0.0-rc.0']
     return mrglv1_periphery.PoolInitializer.deploy(factory.address, WETH9.address, sender=acc)
 
 
-def deploy_mock_callee(acc: AccountAPI) -> ContractInstance:
+def deploy_mock_mrglv1_router(
+    factory: ContractInstance,
+    WETH9: ContractInstance,
+    acc: AccountAPI,
+) -> ContractInstance:
     """
-    Deploys the mock callee for interacting with Marginal v1 and Uniswap v3.
+    Deploys the mock Marginal V1 pool initializer.
 
     Returns:
         :class:`ape.contracts.ContractInstance`
     """
-    return project.Callee.deploy(sender=acc)
+    mrglv1_periphery = project.dependencies['MarginalV1Periphery']['v1.0.0-rc.0']
+    return mrglv1_periphery.Router.deploy(factory.address, WETH9.address, sender=acc)
+
+
+def deploy_mock_mrglv1_manager(
+    factory: ContractInstance,
+    WETH9: ContractInstance,
+    acc: AccountAPI,
+) -> ContractInstance:
+    """
+    Deploys the mock Marginal V1 NFT position manager.
+
+    Returns:
+        :class:`ape.contracts.ContractInstance`
+    """
+    mrglv1_periphery = project.dependencies['MarginalV1Periphery']['v1.0.0-rc.0']
+    return mrglv1_periphery.NonfungiblePositionManager.deploy(factory.address, WETH9.address, sender=acc)
+
+
+def deploy_mock_mrglv1_arbitrageur(
+    factory: ContractInstance,
+    WETH9: ContractInstance,
+    acc: AccountAPI,
+) -> ContractInstance:
+    """
+    Deploys the mock Marginal V1 pair arbitrageur.
+
+    Returns:
+        :class:`ape.contracts.ContractInstance`
+    """
+    mrglv1_periphery = project.dependencies['MarginalV1Periphery']['v1.0.0-rc.0']
+    return mrglv1_periphery.PairArbitrageur.deploy(factory.address, WETH9.address, sender=acc)
