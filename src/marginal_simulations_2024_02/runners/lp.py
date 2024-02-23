@@ -38,6 +38,7 @@ class MarginalV1LPRunner(BaseMarginalV1Runner):
         0,
     ]  # (state_after.liquidity - state_before.liquidity) - position.liquidityLocked
     _net_liquidity_settled_cumulative: List[int] = [0, 0]
+    _last_univ3_fee_growth_global_x128: List[int] = [-1, -1]
 
     @validator("leverage")
     def leverage_greater_than_one(cls, v, **kwargs):
@@ -123,6 +124,86 @@ class MarginalV1LPRunner(BaseMarginalV1Runner):
         click.echo("Arbitraging Marginal v1 and Uniswap v3 pools ...")
         mock_mrglv1_arbitrageur.execute(execute_params, sender=self.acc)
 
+    def _simulate_swaps(self, state: Mapping):
+        """
+        Simulates swaps on Marginal v1 pool based on fee growth on Uniswap v3 pool,
+        scaled down with respect to differences in pool liquidity.
+
+        Args:
+            state (Mapping): The state of references at block
+        """
+        mock_tokens = self._mocks["tokens"]
+        mock_mrglv1_pool = self._mocks["mrglv1_pool"]
+        mock_mrglv1_router = self._mocks["mrglv1_router"]
+        mock_univ3_pool = self._mocks["univ3_pool"]
+
+        net_univ3_fee_growth_global_x128 = [
+            state["univ3_fee_growth_global0_x128"] - self._last_univ3_fee_growth_global_x128[0],
+            state["univ3_fee_growth_global1_x128"] - self._last_univ3_fee_growth_global_x128[1],
+        ]
+
+        # to be conservative, take min between 0 and 1, then swap size back and forth to simulate
+        net_univ3_fee_volumes = [
+            (net_univ3_fee_growth_global_x128[0]) / (1 << 128),
+            (net_univ3_fee_growth_global_x128[1]) / (1 << 128),
+        ]
+        price = (state["sqrt_price_x96"] ** 2) / (1 << 192)
+        net_univ3_fee_volume1 = min(price * net_univ3_fee_volumes[0], net_univ3_fee_volumes[1])
+        click.echo(f"Net Uniswap v3 fee volumes: {net_univ3_fee_volumes}")
+        click.echo(f"Min Uniswap v3 fee volume in token1 terms: {net_univ3_fee_volume1}")
+
+        # scale mrglv1 fee volumes by: mrglv1 fee volume = (mrgl v1 liquidity / uni v3 liquidity) * uni v3 fee volume
+        # roughly given uniswap dashboard (TODO: examine historical data)
+        mrglv1_state = mock_mrglv1_pool.state()
+        mrglv1_fee = mock_mrglv1_pool.fee()
+        net_mrglv1_fee_volume1 = (net_univ3_fee_volume1 * mrglv1_state.liquidity) / state["liquidity"]
+
+        # get size to generate that volume on one side of two swaps (1 => 0 then 0 => 1)
+        click.echo(f"Marginal v1 state before swaps: {mrglv1_state}")
+        amount1_in = net_mrglv1_fee_volume1 / mrglv1_fee
+        swap_params = (
+            mock_tokens[1],
+            mock_tokens[0],
+            self.maintenance,
+            mock_univ3_pool.address,
+            self.acc.address,
+            2**256 - 1,
+            amount1_in,
+            0,
+            0,
+        )
+        receipt = mock_mrglv1_router.exactInputSingle(swap_params, sender=self.acc)
+        amount0_out = -receipt.decode_logs(mock_mrglv1_pool.Swap)[0].amount0
+        click.echo(f"Swapped token1 amount in {amount1_in} for token0 amount out {amount0_out}.")
+
+        # swap amount0 back (0 => 1)
+        swap_params = (
+            mock_tokens[0],
+            mock_tokens[1],
+            self.mainteannce,
+            mock_univ3_pool.address,
+            self.acc.address,
+            2**256 - 1,
+            amount0_out,
+            0,
+            0,
+        )
+        receipt = mock_mrglv1_router.exactInputSingle(swap_params, sender=self.acc)
+        amount1_out = -receipt.decode_logs(mock_mrglv1_pool.Swap)[0].amount1
+        click.echo(f"Swapped token0 amount in {amount0_out} for token1 amount out {amount1_out}.")
+
+        # check fee volume growth due to swaps
+        mrglv1_state_after = mock_mrglv1_pool.state()
+        click.echo(f"Marginal v1 state after swaps: {mrglv1_state_after}")
+        liquidity_delta_fees = mrglv1_state_after.liquidty - mrglv1_state.liquidity
+        click.echo(f"Liquidity gained from fee volume: {liquidity_delta_fees}")
+
+        fees0_delta, fees1_delta = get_mrglv1_amounts_for_liquidity(
+            mrglv1_state_after.sqrtPriceX96,
+            liquidity_delta_fees,
+        )
+        click.echo(f"Amounts gained from fee volume: {[fees0_delta, fees1_delta]}")
+
     def setup(self, mocking: bool = True):
         """
         Overrides setup to deploy the Marginal v1 LP backtester.
@@ -191,6 +272,10 @@ class MarginalV1LPRunner(BaseMarginalV1Runner):
 
         # set the current state of univ3 and mrglv1 pools
         self.set_mocks_state(state)
+
+        # store latest uni v3 fee growth values for relative volume on mrgl v1 pools
+        for i in range(2):
+            self._last_univ3_fee_growth_global_x128[i] = state[f"fee_growth_global{i}_x128"]
 
         # mint tokens to near inf tokens to:
         #  - univ3 pool so swaps work
@@ -318,7 +403,8 @@ class MarginalV1LPRunner(BaseMarginalV1Runner):
         mock_mrglv1_manager = self._mocks["mrglv1_manager"]
         mock_mrglv1_pool = self._mocks["mrglv1_pool"]
 
-        # TODO: simulate swaps for fee volume
+        # simulate swaps for fee volume on mrgl v1
+        self._simulate_swaps(state)
 
         # arbitrage univ3 and mrglv1 pools to close price gap
         self._arb_pools()
@@ -337,7 +423,7 @@ class MarginalV1LPRunner(BaseMarginalV1Runner):
             pposition = mock_mrglv1_pool.positions(
                 get_mrglv1_position_key(mock_mrglv1_manager.address, position.positionId)
             )
-            state_before = mock_mrglv1_pool.state()
+            mrglv1_state_before = mock_mrglv1_pool.state()
 
             # liquidate position if not safe
             if not position.safe:
@@ -349,9 +435,12 @@ class MarginalV1LPRunner(BaseMarginalV1Runner):
                 )
 
                 # cache state after and calculate net liquidity gained/lost
-                state_after = mock_mrglv1_pool.state()
-                liquidity_returned = state_after.liquidity - state_before.liquidity
+                mrglv1_state_after = mock_mrglv1_pool.state()
+                liquidity_returned = mrglv1_state_after.liquidity - mrglv1_state_before.liquidity
                 net_liquidity = liquidity_returned - pposition.liquidityLocked
+                click.secho(
+                    f"Net liquidity gained by pool after liquidating: {net_liquidity}", blink=(net_liquidity < 0)
+                )
 
                 self._token_ids[i] = -1
                 self._positions_liquidated_cumulative[i] += 1
@@ -374,9 +463,10 @@ class MarginalV1LPRunner(BaseMarginalV1Runner):
                 mock_mrglv1_manager.burn(burn_params, sender=self.acc)
 
                 # cache state after and calculate net liquidity gained/lost
-                state_after = mock_mrglv1_pool.state()
-                liquidity_returned = state_after.liquidity - state_before.liquidity
+                mrglv1_state_after = mock_mrglv1_pool.state()
+                liquidity_returned = mrglv1_state_after.liquidity - mrglv1_state_before.liquidity
                 net_liquidity = liquidity_returned - pposition.liquidityLocked
+                click.secho(f"Net liquidity gained by pool after settling: {net_liquidity}", blink=(net_liquidity < 0))
 
                 self._token_ids[i] = -1
                 self._positions_settled_cumulative[i] += 1
