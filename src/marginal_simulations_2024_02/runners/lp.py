@@ -250,12 +250,12 @@ class MarginalV1LPRunner(BaseMarginalV1Runner):
 
         data.update(
             {
-                "sqrtPriceX96": state["slot0"].sqrtPriceX96,
-                "liquidity": state["liquidity"],
-                "feeGrowthGlobal0X128": state["fee_growth_global0_x128"],
-                "feeGrowthGlobal1X128": state["fee_growth_global1_x128"],
-                "observation0": state["observation0"],
-                "observation1": state["observation1"],
+                "univ3_sqrtPriceX96": state["slot0"].sqrtPriceX96,
+                "univ3_liquidity": state["liquidity"],
+                "univ3_feeGrowthGlobal0X128": state["fee_growth_global0_x128"],
+                "univ3_feeGrowthGlobal1X128": state["fee_growth_global1_x128"],
+                "univ3_observation0": state["observation0"],
+                "univ3_observation1": state["observation1"],
             }
         )
 

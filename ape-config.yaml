@@ -34,7 +34,7 @@ dependencies:
     ref: v1.0.0-rc.4
   - name: MarginalV1Periphery
     github: MarginalProtocol/v1-periphery
-    ref: v1.0.0-beta.10
+    ref: v1.0.0-rc.0
   - name: UniswapV3Core
     github: Uniswap/v3-core
     ref: 0.8
@@ -50,7 +50,7 @@ solidity:
   import_remapping:
     - "@openzeppelin/contracts=OpenZeppelin/v4.8.3"
     - "@marginal/v1-core/contracts=MarginalV1Core/v1.0.0-rc.4"
-    - "@marginal/v1-periphery/contracts=MarginalV1Periphery/v1.0.0-beta.10"
+    - "@marginal/v1-periphery/contracts=MarginalV1Periphery/v1.0.0-rc.0"
     - "@uniswap/v3-core/contracts=UniswapV3Core/v0.8"
     - "@uniswap/v3-periphery/contracts=UniswapV3Periphery/v0.8"
     - "@smolquants/backtest-ape/contracts=BacktestApe/v0.1.0-alpha.15"
