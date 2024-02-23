@@ -13,6 +13,7 @@ from marginal_simulations_2024_02.constants import MINIMUM_LIQUIDITY
 from marginal_simulations_2024_02.utils import (
     get_mrglv1_amounts_for_liquidity,
     get_mrglv1_size_from_liquidity_delta,
+    get_mrglv1_position_key,
 )
 
 
@@ -32,6 +33,11 @@ class MarginalV1LPRunner(BaseMarginalV1Runner):
     _positions_settled_cumulative: List[int] = [0, 0]
     _sizes_liquidated_cumulative: List[int] = [0, 0]
     _sizes_settled_cumulative: List[int] = [0, 0]
+    _net_liquidity_liquidated_cumulative: List[int] = [
+        0,
+        0,
+    ]  # (state_after.liquidity - state_before.liquidity) - position.liquidityLocked
+    _net_liquidity_settled_cumulative: List[int] = [0, 0]
 
     @validator("leverage")
     def leverage_greater_than_one(cls, v, **kwargs):
@@ -327,18 +333,35 @@ class MarginalV1LPRunner(BaseMarginalV1Runner):
             position = mock_mrglv1_manager.positions(token_id)
             click.echo(f"Position status of tokenID {token_id}: {position}")
 
+            # cache state before settling/liquidating to calculate net liquidity gained/lost by pool
+            pposition = mock_mrglv1_pool.positions(
+                get_mrglv1_position_key(mock_mrglv1_manager.address, position.positionId)
+            )
+            state_before = mock_mrglv1_pool.state()
+
             # liquidate position if not safe
             if not position.safe:
                 click.echo(f"Liquidating position with tokenID {token_id} ...")
+
+                # liquidate the position
                 mock_mrglv1_pool.liquidate(
                     self.acc.address, mock_mrglv1_manager.address, position.positionId, sender=self.acc
                 )
+
+                # cache state after and calculate net liquidity gained/lost
+                state_after = mock_mrglv1_pool.state()
+                liquidity_returned = state_after.liquidity - state_before.liquidity
+                net_liquidity = liquidity_returned - pposition.liquidityLocked
+
                 self._token_ids[i] = -1
                 self._positions_liquidated_cumulative[i] += 1
                 self._sizes_liquidated_cumulative[i] += position.size
+                self._net_liquidity_liquidated_cumulative[i] += net_liquidity
             # otherwise settle position if enough blocks have passed
             elif number >= self._blocks_settle[i]:
                 click.echo(f"Settling position with tokenID {token_id} ...")
+
+                # settle the position
                 burn_params = (
                     mock_tokens[0],
                     mock_tokens[1],
@@ -349,9 +372,16 @@ class MarginalV1LPRunner(BaseMarginalV1Runner):
                     2**256 - 1,
                 )
                 mock_mrglv1_manager.burn(burn_params, sender=self.acc)
+
+                # cache state after and calculate net liquidity gained/lost
+                state_after = mock_mrglv1_pool.state()
+                liquidity_returned = state_after.liquidity - state_before.liquidity
+                net_liquidity = liquidity_returned - pposition.liquidityLocked
+
                 self._token_ids[i] = -1
                 self._positions_settled_cumulative[i] += 1
                 self._sizes_settled_cumulative[i] += position.size
+                self._net_liquidity_settled_cumulative[i] += net_liquidity
 
         # open any new positions if don't have existing long or short
         for i, token_id in enumerate(self._token_ids.copy()):
@@ -428,6 +458,8 @@ class MarginalV1LPRunner(BaseMarginalV1Runner):
             "_positions_settled_cumulative",
             "_sizes_liquidated_cumulative",
             "_sizes_settled_cumulative",
+            "_net_liquidity_liquidated_cumulative",
+            "_net_liquidity_settled_cumulative",
         ]
         for name in attr_names:
             cum_list = getattr(self, name)
