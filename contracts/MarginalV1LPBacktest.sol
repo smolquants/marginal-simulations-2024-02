@@ -61,8 +61,8 @@ contract MarginalV1LPBacktest is Backtest {
 
         // set the values to track through backtest
         values_[0] = uint256(_liquidity);
-        values_[1] = amount0;
-        values_[2] = amount1;
-        values_[3] = uint256(sqrtPriceX96);
+        values_[1] = uint256(sqrtPriceX96);
+        values_[2] = amount0;
+        values_[3] = amount1;
     }
 }

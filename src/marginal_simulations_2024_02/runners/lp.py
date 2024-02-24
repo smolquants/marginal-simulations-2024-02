@@ -9,7 +9,7 @@ from backtest_ape.utils import get_block_identifier
 from pydantic import validator
 
 from marginal_simulations_2024_02.runners.base import BaseMarginalV1Runner
-from marginal_simulations_2024_02.constants import MINIMUM_LIQUIDITY
+from marginal_simulations_2024_02.constants import FEE_UNIT, MINIMUM_LIQUIDITY
 from marginal_simulations_2024_02.utils import (
     get_mrglv1_amounts_for_liquidity,
     get_mrglv1_size_from_liquidity_delta,
@@ -137,18 +137,19 @@ class MarginalV1LPRunner(BaseMarginalV1Runner):
         mock_mrglv1_router = self._mocks["mrglv1_router"]
         mock_univ3_pool = self._mocks["univ3_pool"]
 
+        # net fee growth is cumulative fee amounts per unit of liquidity since last check
         net_univ3_fee_growth_global_x128 = [
-            state["univ3_fee_growth_global0_x128"] - self._last_univ3_fee_growth_global_x128[0],
-            state["univ3_fee_growth_global1_x128"] - self._last_univ3_fee_growth_global_x128[1],
+            state["fee_growth_global0_x128"] - self._last_univ3_fee_growth_global_x128[0],
+            state["fee_growth_global1_x128"] - self._last_univ3_fee_growth_global_x128[1],
         ]
 
-        # to be conservative, take min between 0 and 1, then swap size back and forth to simulate
+        # to be conservative, take avg between fees0 and fees1 in 1 terms, then swap size back and forth to simulate
         net_univ3_fee_volumes = [
-            (net_univ3_fee_growth_global_x128[0]) / (1 << 128),
-            (net_univ3_fee_growth_global_x128[1]) / (1 << 128),
+            (net_univ3_fee_growth_global_x128[0] * state["liquidity"]) // (1 << 128),
+            (net_univ3_fee_growth_global_x128[1] * state["liquidity"]) // (1 << 128),
         ]
-        price = (state["sqrt_price_x96"] ** 2) / (1 << 192)
-        net_univ3_fee_volume1 = min(price * net_univ3_fee_volumes[0], net_univ3_fee_volumes[1])
+        price = (state["slot0"].sqrtPriceX96 ** 2) / (1 << 192)
+        net_univ3_fee_volume1 = int((price * net_univ3_fee_volumes[0] + net_univ3_fee_volumes[1]) / 2)
         click.echo(f"Net Uniswap v3 fee volumes: {net_univ3_fee_volumes}")
         click.echo(f"Min Uniswap v3 fee volume in token1 terms: {net_univ3_fee_volume1}")
 
@@ -156,12 +157,16 @@ class MarginalV1LPRunner(BaseMarginalV1Runner):
         # roughly given uniswap dashboard (TODO: examine historical data)
         mrglv1_state = mock_mrglv1_pool.state()
         mrglv1_fee = mock_mrglv1_pool.fee()
-        net_mrglv1_fee_volume1 = (net_univ3_fee_volume1 * mrglv1_state.liquidity) / state["liquidity"]
+        net_mrglv1_fee_volume1 = (net_univ3_fee_volume1 * mrglv1_state.liquidity) // state["liquidity"]
         click.echo(f"Desired net Marginal v1 fee1 volumes: {net_mrglv1_fee_volume1}")
 
         # get size to generate that volume on one side of two swaps (1 => 0 then 0 => 1)
         click.echo(f"Marginal v1 state before swaps: {mrglv1_state}")
-        amount1_in = net_mrglv1_fee_volume1 / mrglv1_fee
+        amount1_in = (net_mrglv1_fee_volume1 * FEE_UNIT) // mrglv1_fee
+        click.echo(f"Desired amount1 in to Marginal v1 pool for swaps: {amount1_in}")
+        if amount1_in == 0:
+            return
+
         swap_params = (
             mock_tokens[1],
             mock_tokens[0],
@@ -181,7 +186,7 @@ class MarginalV1LPRunner(BaseMarginalV1Runner):
         swap_params = (
             mock_tokens[0],
             mock_tokens[1],
-            self.mainteannce,
+            self.maintenance,
             mock_univ3_pool.address,
             self.acc.address,
             2**256 - 1,
@@ -196,7 +201,7 @@ class MarginalV1LPRunner(BaseMarginalV1Runner):
         # check fee volume growth due to swaps
         mrglv1_state_after = mock_mrglv1_pool.state()
         click.echo(f"Marginal v1 state after swaps: {mrglv1_state_after}")
-        liquidity_delta_fees = mrglv1_state_after.liquidty - mrglv1_state.liquidity
+        liquidity_delta_fees = mrglv1_state_after.liquidity - mrglv1_state.liquidity
         click.echo(f"Liquidity gained from fee volume: {liquidity_delta_fees}")
 
         fees0_delta, fees1_delta = get_mrglv1_amounts_for_liquidity(
@@ -282,9 +287,8 @@ class MarginalV1LPRunner(BaseMarginalV1Runner):
         #  - univ3 pool so swaps work
         #  - backtester to add liquidity to mrglv1 pool
         #  - self.acc to take out positions on mrglv1 pool
-        targets = [mock_token.address for mock_token in mock_tokens]
-        targets += targets  # given 3 iterations to multicall
-        targets += targets
+        mock_token_addresses = [[mock_token.address for mock_token in mock_tokens] for i in range(3)]
+        targets = sum(mock_token_addresses, [])
         datas = [
             ecosystem.encode_transaction(
                 mock_token.address,
@@ -312,54 +316,16 @@ class MarginalV1LPRunner(BaseMarginalV1Runner):
             ).data
             for i, mock_token in enumerate(mock_tokens)
         ]
-        datas += [
-            ecosystem.encode_transaction(
-                mock_token.address,
-                mock_token.approve.abis[0],
-                mock_mrglv1_router.address,
-                2**256 - 1,
-            ).data
-            for i, mock_token in enumerate(mock_tokens)
-        ]
-        values = [0 for _ in range(8)]
+        values = [0 for _ in range(6)]
         self.backtester.multicall(targets, datas, values, sender=self.acc)
 
         for mock_token in mock_tokens:
             mock_token.mint(self.acc.address, 2**128 - 1, sender=self.acc)
             mock_token.approve(mock_mrglv1_manager.address, 2**256 - 1, sender=self.acc)
-
-    def set_mocks_state(self, state: Mapping):
-        """
-        Sets the state of mocks.
-
-        Args:
-            state (Mapping): The new state of mocks.
-        """
-        # update mock univ3 pool for state attrs
-        mock_univ3_pool = self._mocks["univ3_pool"]
-        datas = [
-            mock_univ3_pool.setSlot0.as_transaction(state["slot0"]).data,
-            mock_univ3_pool.setLiquidity.as_transaction(state["liquidity"]).data,
-            mock_univ3_pool.setFeeGrowthGlobalX128.as_transaction(
-                state["fee_growth_global0_x128"], state["fee_growth_global1_x128"]
-            ).data,
-            mock_univ3_pool.pushObservation.as_transaction(*state["observation0"]).data,
-            mock_univ3_pool.pushObservation.as_transaction(*state["observation1"]).data,
-        ]
-        mock_univ3_pool.calls(datas, sender=self.acc)
-
-    def init_strategy(self):
-        """
-        Initializes the strategy being backtested through backtester contract
-        at the given block.
-        """
-        mock_mrglv1_initializer = self._mocks["mrglv1_initializer"]
-        mock_univ3_pool = self._mocks["univ3_pool"]
-        mock_tokens = self._mocks["tokens"]
-        ecosystem = chain.provider.network.ecosystem
+            mock_token.approve(mock_mrglv1_router.address, 2**256 - 1, sender=self.acc)
 
         # mint the LP position via the mrglv1 initializer
-        sqrt_price_x96_desired = mock_univ3_pool.slot0().sqrtPriceX96
+        sqrt_price_x96_desired = state["slot0"].sqrtPriceX96
         amount0_desired, amount1_desired = get_mrglv1_amounts_for_liquidity(
             sqrt_price_x96_desired,
             self.liquidity,
@@ -393,6 +359,26 @@ class MarginalV1LPRunner(BaseMarginalV1Runner):
             0,
             sender=self.acc,
         )
+
+    def set_mocks_state(self, state: Mapping):
+        """
+        Sets the state of mocks.
+
+        Args:
+            state (Mapping): The new state of mocks.
+        """
+        # update mock univ3 pool for state attrs
+        mock_univ3_pool = self._mocks["univ3_pool"]
+        datas = [
+            mock_univ3_pool.setSlot0.as_transaction(state["slot0"]).data,
+            mock_univ3_pool.setLiquidity.as_transaction(state["liquidity"]).data,
+            mock_univ3_pool.setFeeGrowthGlobalX128.as_transaction(
+                state["fee_growth_global0_x128"], state["fee_growth_global1_x128"]
+            ).data,
+            mock_univ3_pool.pushObservation.as_transaction(*state["observation0"]).data,
+            mock_univ3_pool.pushObservation.as_transaction(*state["observation1"]).data,
+        ]
+        mock_univ3_pool.calls(datas, sender=self.acc)
 
     def update_strategy(self, number: int, state: Mapping):
         """
