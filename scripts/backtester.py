@@ -55,6 +55,7 @@ def main():
 
     # setup runner
     runner = runner_cls(**kwargs)
+    click.echo(f"Runner instance: {runner}")
 
     # run backtest
     univ3_pool_addr = runner._refs["univ3_pool"].address

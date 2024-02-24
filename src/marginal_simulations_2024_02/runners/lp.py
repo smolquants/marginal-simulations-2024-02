@@ -44,18 +44,21 @@ class MarginalV1LPRunner(BaseMarginalV1Runner):
     def leverage_greater_than_one(cls, v, **kwargs):
         if v <= 1:
             raise ValueError("leverage must be greater than 1")
+        return v
 
     @validator("utilization")
     def utilization_between_zero_and_one(cls, v, **kwargs):
         if v < 0 or v > 1:
             raise ValueError("utilization must be between 0 and 1")
+        return v
 
     @validator("skew")
     def skew_mag_less_than_one(cls, v, **kwargs):
         if abs(v) > 1:
             raise ValueError("skew must be between -1 and 1")
+        return v
 
-    def _calculate_position_liquidity_deltas(self) -> (int, int):
+    def calculate_position_liquidity_deltas(self) -> (int, int):
         """
         Calculates position liquidity deltas to take for
         zeroForOne = true and zeroForOne = false values.
@@ -84,7 +87,7 @@ class MarginalV1LPRunner(BaseMarginalV1Runner):
         liquidity_delta_10 = (total_liquidity * self.utilization * (1 - self.skew)) // 2
         return (liquidity_delta_01, liquidity_delta_10)
 
-    def _arb_pools(self):
+    def arb_pools(self):
         """
         Arbs price differences between Marginal v1 pool and Uniswap v3 pool
         if below tolerance.
@@ -124,7 +127,7 @@ class MarginalV1LPRunner(BaseMarginalV1Runner):
         click.echo("Arbitraging Marginal v1 and Uniswap v3 pools ...")
         mock_mrglv1_arbitrageur.execute(execute_params, sender=self.acc)
 
-    def _simulate_swaps(self, state: Mapping):
+    def simulate_swaps(self, state: Mapping):
         """
         Simulates swaps on Marginal v1 pool based on fee growth on Uniswap v3 pool,
         scaled down with respect to differences in pool liquidity.
@@ -396,10 +399,10 @@ class MarginalV1LPRunner(BaseMarginalV1Runner):
         mock_mrglv1_pool = self._mocks["mrglv1_pool"]
 
         # simulate swaps for fee volume on mrgl v1
-        self._simulate_swaps(state)
+        self.simulate_swaps(state)
 
         # arbitrage univ3 and mrglv1 pools to close price gap
-        self._arb_pools()
+        self.arb_pools()
 
         # liquidate or settle outstanding positions
         for i, token_id in enumerate(self._token_ids.copy()):
@@ -471,7 +474,7 @@ class MarginalV1LPRunner(BaseMarginalV1Runner):
                 # position already there
                 continue
 
-            liquidity_delta = self._calculate_position_liquidity_deltas()[i]
+            liquidity_delta = self.calculate_position_liquidity_deltas()[i]
             mrglv1_state = mock_mrglv1_pool.state()
             zero_for_one = i == 0
             size_desired = get_mrglv1_size_from_liquidity_delta(
@@ -506,7 +509,7 @@ class MarginalV1LPRunner(BaseMarginalV1Runner):
             click.echo(f"Opened new position with tokenID {next_token_id}: {next_position}")
 
         # arb pools again given potential positions opened if arb there
-        self._arb_pools()
+        self.arb_pools()
 
     def record(self, path: str, number: int, state: Mapping, values: List[int]):
         """
