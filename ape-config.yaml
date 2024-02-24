@@ -43,7 +43,7 @@ dependencies:
     ref: 0.8
   - name: BacktestApe
     github: smolquants/backtest-ape
-    ref: "v0.1.0-alpha.15"
+    ref: "v0.1.0-alpha.14"
 
 solidity:
   via_ir: true
@@ -53,4 +53,4 @@ solidity:
     - "@marginal/v1-periphery/contracts=MarginalV1Periphery/v1.0.0-rc.0"
     - "@uniswap/v3-core/contracts=UniswapV3Core/v0.8"
     - "@uniswap/v3-periphery/contracts=UniswapV3Periphery/v0.8"
-    - "@smolquants/backtest-ape/contracts=BacktestApe/v0.1.0-alpha.15"
+    - "@smolquants/backtest-ape/contracts=BacktestApe/v0.1.0-alpha.14"

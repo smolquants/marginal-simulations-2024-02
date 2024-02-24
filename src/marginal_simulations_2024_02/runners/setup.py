@@ -46,11 +46,8 @@ def deploy_mock_mrglv1_factory(
     Returns:
         :class:`ape.contracts.ContractInstance`
     """
-    mrglv1_core = project.dependencies['MarginalV1Core']['v1.0.0-rc.4']
-    deployer = mrglv1_core.MarginalV1PoolDeployer.deploy(sender=acc)
-    return mrglv1_core.MarginalV1Factory.deploy(
-        deployer.address, univ3_factory.address, obs_cardinality_min, sender=acc
-    )
+    deployer = project.MarginalV1PoolDeployer.deploy(sender=acc)
+    return project.MarginalV1Factory.deploy(deployer.address, univ3_factory.address, obs_cardinality_min, sender=acc)
 
 
 def create_mock_mrglv1_pool(
@@ -71,9 +68,7 @@ def create_mock_mrglv1_pool(
 
     factory.createPool(token0.address, token1.address, maintenance, univ3_fee, sender=acc)
     pool_addr = factory.getPool(token0.address, token1.address, maintenance, oracle.address)
-
-    mrglv1_core = project.dependencies['MarginalV1Core']['v1.0.0-rc.4']
-    pool = mrglv1_core.MarginalV1Pool.at(pool_addr)
+    pool = project.MarginalV1Pool.at(pool_addr)
     return pool
 
 
@@ -88,8 +83,7 @@ def deploy_mock_mrglv1_initializer(
     Returns:
         :class:`ape.contracts.ContractInstance`
     """
-    mrglv1_periphery = project.dependencies['MarginalV1Periphery']['v1.0.0-rc.0']
-    return mrglv1_periphery.PoolInitializer.deploy(factory.address, WETH9.address, sender=acc)
+    return project.PoolInitializer.deploy(factory.address, WETH9.address, sender=acc)
 
 
 def deploy_mock_mrglv1_router(
@@ -103,8 +97,7 @@ def deploy_mock_mrglv1_router(
     Returns:
         :class:`ape.contracts.ContractInstance`
     """
-    mrglv1_periphery = project.dependencies['MarginalV1Periphery']['v1.0.0-rc.0']
-    return mrglv1_periphery.Router.deploy(factory.address, WETH9.address, sender=acc)
+    return project.Router.deploy(factory.address, WETH9.address, sender=acc)
 
 
 def deploy_mock_mrglv1_manager(
@@ -118,8 +111,7 @@ def deploy_mock_mrglv1_manager(
     Returns:
         :class:`ape.contracts.ContractInstance`
     """
-    mrglv1_periphery = project.dependencies['MarginalV1Periphery']['v1.0.0-rc.0']
-    return mrglv1_periphery.NonfungiblePositionManager.deploy(factory.address, WETH9.address, sender=acc)
+    return project.NonfungiblePositionManager.deploy(factory.address, WETH9.address, sender=acc)
 
 
 def deploy_mock_mrglv1_arbitrageur(
@@ -133,5 +125,4 @@ def deploy_mock_mrglv1_arbitrageur(
     Returns:
         :class:`ape.contracts.ContractInstance`
     """
-    mrglv1_periphery = project.dependencies['MarginalV1Periphery']['v1.0.0-rc.0']
-    return mrglv1_periphery.PairArbitrageur.deploy(factory.address, WETH9.address, sender=acc)
+    return project.PairArbitrageur.deploy(factory.address, WETH9.address, sender=acc)

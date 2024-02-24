@@ -157,6 +157,7 @@ class MarginalV1LPRunner(BaseMarginalV1Runner):
         mrglv1_state = mock_mrglv1_pool.state()
         mrglv1_fee = mock_mrglv1_pool.fee()
         net_mrglv1_fee_volume1 = (net_univ3_fee_volume1 * mrglv1_state.liquidity) / state["liquidity"]
+        click.echo(f"Desired net Marginal v1 fee1 volumes: {net_mrglv1_fee_volume1}")
 
         # get size to generate that volume on one side of two swaps (1 => 0 then 0 => 1)
         click.echo(f"Marginal v1 state before swaps: {mrglv1_state}")
@@ -246,13 +247,13 @@ class MarginalV1LPRunner(BaseMarginalV1Runner):
         tick_cumulatives, seconds_per_liquidity_cumulatives = ref_univ3_pool.observe(
             [seconds_ago, 0], block_identifier=block_identifier
         )
-        state["observations0"] = (
+        state["observation0"] = (
             timestamp - seconds_ago,
             tick_cumulatives[0],
             seconds_per_liquidity_cumulatives[0],
             True,
         )
-        state["observations1"] = (timestamp, tick_cumulatives[1], seconds_per_liquidity_cumulatives[1], True)
+        state["observation1"] = (timestamp, tick_cumulatives[1], seconds_per_liquidity_cumulatives[1], True)
         return state
 
     def init_mocks_state(self, number: int, state: Mapping):
@@ -335,12 +336,17 @@ class MarginalV1LPRunner(BaseMarginalV1Runner):
             state (Mapping): The new state of mocks.
         """
         # update mock univ3 pool for state attrs
-        mock_univ3_pool = self._mocks["pool"]
-        mock_univ3_pool.setSlot0(state["slot0"])
-        mock_univ3_pool.setLiquidity(state["liquidity"])
-        mock_univ3_pool.setFeeGrowthGlobalX128(state["fee_growth_global0_x128"], state["fee_growth_global1_x128"])
-        for i in range(2):
-            mock_univ3_pool.pushObservation(*state[f"observation{i}"])
+        mock_univ3_pool = self._mocks["univ3_pool"]
+        datas = [
+            mock_univ3_pool.setSlot0.as_transaction(state["slot0"]).data,
+            mock_univ3_pool.setLiquidity.as_transaction(state["liquidity"]).data,
+            mock_univ3_pool.setFeeGrowthGlobalX128.as_transaction(
+                state["fee_growth_global0_x128"], state["fee_growth_global1_x128"]
+            ).data,
+            mock_univ3_pool.pushObservation.as_transaction(*state["observation0"]).data,
+            mock_univ3_pool.pushObservation.as_transaction(*state["observation1"]).data,
+        ]
+        mock_univ3_pool.calls(datas, sender=self.acc)
 
     def init_strategy(self):
         """

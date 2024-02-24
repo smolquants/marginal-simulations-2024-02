@@ -30,7 +30,7 @@ dependencies = [
   "matplotlib",
   "scipy",
   "notebook",
-  "backtest-ape==0.1.0a15",
+  "backtest-ape==0.1.0a14",
 ]
 
 [project.urls]

@@ -31,3 +31,35 @@ Then launch [`ape-notebook`](https://github.com/ApeWorX/ape-notebook)
 ```
 
 ## Scripts
+
+Scripts using backtester contracts rely on [`backtest-ape`](https://github.com/smolquants/backtest-ape) and
+[`ape-foundry`](https://github.com/ApeWorX/ape-foundry) mainnet-fork functionality. These produce backtest results
+for passive liquidity in Marginal v1 pools.
+
+Compile the needed contracts
+
+```sh
+(marginal-simulations-2024-02) ape compile --size
+```
+
+Then run the backtest script with e.g. the `MarginalV1LPRunner`
+
+```sh
+(marginal-simulations-2024-02) ape run backtester
+INFO: Starting 'anvil' process.
+You are connected to provider network ethereum:mainnet-fork:foundry.
+Runner type (MarginalV1LPRunner): MarginalV1LPRunner
+Runner kwarg (ref_addrs) [{}]: {"WETH9": "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2", "univ3_pool": "0x88e6A0c2dDD26FEEb64F039a2c41296FcB3f5640"}
+Runner kwarg (acc_addr) defaults to None. Do you want to input a value? [y/N]: N
+Runner kwarg (maintenance) [250000]:
+Runner kwarg (liquidity) [0]: 91287092917527680  # $10M of total liquidity
+Runner kwarg (utilization) [0]: 0.1
+Runner kwarg (skew) [0]: -0.25
+Runner kwarg (leverage) [1.1]: 3
+Runner kwarg (blocks_held) [7200]: 50400
+Runner kwarg (sqrt_price_tol) [0.0025]:
+Start block number: 16219692
+Stop block number [-1]: 16867692
+Step size [1]: 2400
+Setting up runner ...
+```

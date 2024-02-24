@@ -1,4 +1,4 @@
-from .runner import MarginalV1LPRunner
+from .runners import MarginalV1LPRunner
 
 
 __all__ = [
