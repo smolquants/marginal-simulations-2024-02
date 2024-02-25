@@ -29,13 +29,7 @@ import {IQuoter} from "@marginal/v1-periphery/contracts/interfaces/IQuoter.sol";
 
 /// @title Quoter for Marginal v1 pools
 /// @notice Quotes the result of leverage trades and swaps on Marginal v1 pools
-contract Quoter is
-    IQuoter,
-    PeripheryImmutableState,
-    PeripheryValidation,
-    PositionState,
-    Multicall
-{
+contract Quoter is IQuoter, PeripheryImmutableState, PeripheryValidation, PositionState, Multicall {
     using Path for bytes;
 
     INonfungiblePositionManager public immutable manager;
@@ -52,9 +46,7 @@ contract Quoter is
     }
 
     /// @dev Returns the pool for the given token pair and maintenance. The pool contract may or may not exist.
-    function getPool(
-        PoolAddress.PoolKey memory poolKey
-    ) internal view returns (IMarginalV1Pool) {
+    function getPool(PoolAddress.PoolKey memory poolKey) internal view returns (IMarginalV1Pool) {
         return IMarginalV1Pool(PoolAddress.getAddress(factory, poolKey));
     }
 
@@ -86,16 +78,7 @@ contract Quoter is
             })
         );
 
-        (
-            uint160 sqrtPriceX96,
-            ,
-            uint128 liquidity,
-            int24 tick,
-            ,
-            ,
-            uint8 feeProtocol,
-            bool initialized
-        ) = pool.state();
+        (uint160 sqrtPriceX96, , uint128 liquidity, int24 tick, , , uint8 feeProtocol, bool initialized) = pool.state();
         if (!initialized) revert("Not initialized");
 
         uint128 liquidityDelta = PositionAmounts.getLiquidityForSize(
@@ -105,33 +88,21 @@ contract Quoter is
             params.zeroForOne,
             params.sizeDesired
         );
-        if (
-            liquidityDelta == 0 ||
-            liquidityDelta + PoolConstants.MINIMUM_LIQUIDITY >= liquidity
-        ) revert("Invalid liquidityDelta");
+        if (liquidityDelta == 0 || liquidityDelta + PoolConstants.MINIMUM_LIQUIDITY >= liquidity)
+            revert("Invalid liquidityDelta");
 
         uint160 sqrtPriceLimitX96 = params.sqrtPriceLimitX96 == 0
-            ? (
-                params.zeroForOne
-                    ? TickMath.MIN_SQRT_RATIO + 1
-                    : TickMath.MAX_SQRT_RATIO - 1
-            )
+            ? (params.zeroForOne ? TickMath.MIN_SQRT_RATIO + 1 : TickMath.MAX_SQRT_RATIO - 1)
             : params.sqrtPriceLimitX96;
         if (
             params.zeroForOne
-                ? !(sqrtPriceLimitX96 < sqrtPriceX96 &&
-                    sqrtPriceLimitX96 > SqrtPriceMath.MIN_SQRT_RATIO)
-                : !(sqrtPriceLimitX96 > sqrtPriceX96 &&
-                    sqrtPriceLimitX96 < SqrtPriceMath.MAX_SQRT_RATIO)
+                ? !(sqrtPriceLimitX96 < sqrtPriceX96 && sqrtPriceLimitX96 > SqrtPriceMath.MIN_SQRT_RATIO)
+                : !(sqrtPriceLimitX96 > sqrtPriceX96 && sqrtPriceLimitX96 < SqrtPriceMath.MAX_SQRT_RATIO)
         ) revert("Invalid sqrtPriceLimitX96");
 
-        uint128 debtMaximum = params.debtMaximum == 0
-            ? type(uint128).max
-            : params.debtMaximum;
+        uint128 debtMaximum = params.debtMaximum == 0 ? type(uint128).max : params.debtMaximum;
 
-        uint256 amountInMaximum = params.amountInMaximum == 0
-            ? type(uint256).max
-            : params.amountInMaximum;
+        uint256 amountInMaximum = params.amountInMaximum == 0 ? type(uint256).max : params.amountInMaximum;
 
         uint160 sqrtPriceX96Next = SqrtPriceMath.sqrtPriceX96NextOpen(
             liquidity,
@@ -140,11 +111,8 @@ contract Quoter is
             params.zeroForOne,
             params.maintenance
         );
-        if (
-            params.zeroForOne
-                ? sqrtPriceX96Next < sqrtPriceLimitX96
-                : sqrtPriceX96Next > sqrtPriceLimitX96
-        ) revert("sqrtPriceX96Next exceeds limit");
+        if (params.zeroForOne ? sqrtPriceX96Next < sqrtPriceLimitX96 : sqrtPriceX96Next > sqrtPriceLimitX96)
+            revert("sqrtPriceX96Next exceeds limit");
 
         // @dev ignore tick cumulatives and timestamps on position assemble
         PositionLibrary.Info memory position = PositionLibrary.assemble(
@@ -166,12 +134,8 @@ contract Quoter is
             position.insurance1 < PoolConstants.MINIMUM_SIZE
         ) revert("Invalid position");
 
-        uint128 marginMinimum = PositionLibrary.marginMinimum(
-            position,
-            params.maintenance
-        );
-        if (marginMinimum == 0 || params.margin < marginMinimum)
-            revert("Margin less than min");
+        uint128 marginMinimum = PositionLibrary.marginMinimum(position, params.maintenance);
+        if (marginMinimum == 0 || params.margin < marginMinimum) revert("Margin less than min");
         position.margin = params.margin;
 
         size = position.size;
@@ -190,41 +154,30 @@ contract Quoter is
         uint256 _fees = fees;
         if (feeProtocol > 0) _fees -= uint256(_fees / feeProtocol);
 
-        (liquidityAfter, sqrtPriceX96After) = LiquidityMath
-            .liquiditySqrtPriceX96Next(
-                liquidity - liquidityDelta,
-                sqrtPriceX96Next,
-                !params.zeroForOne ? int256(_fees) : int256(0),
-                !params.zeroForOne ? int256(0) : int256(_fees)
-            );
+        (liquidityAfter, sqrtPriceX96After) = LiquidityMath.liquiditySqrtPriceX96Next(
+            liquidity - liquidityDelta,
+            sqrtPriceX96Next,
+            !params.zeroForOne ? int256(_fees) : int256(0),
+            !params.zeroForOne ? int256(0) : int256(_fees)
+        );
 
         uint128 liquidityLocked = pool.liquidityLocked();
         liquidityLockedAfter = liquidityLocked + liquidityDelta;
 
         // check whether position would be safe after open given twap oracle lag
         {
-            int56[] memory oracleTickCumulativesLast = getOracleSynced(
-                address(pool)
+            int56[] memory oracleTickCumulativesLast = getOracleSynced(address(pool));
+            int56 oracleTickCumulativeDelta = OracleLibrary.oracleTickCumulativeDelta(
+                oracleTickCumulativesLast[0],
+                oracleTickCumulativesLast[1]
             );
-            int56 oracleTickCumulativeDelta = OracleLibrary
-                .oracleTickCumulativeDelta(
-                    oracleTickCumulativesLast[0],
-                    oracleTickCumulativesLast[1]
-                );
 
             safe = PositionLibrary.safe(
                 position,
-                OracleLibrary.oracleSqrtPriceX96(
-                    oracleTickCumulativeDelta,
-                    PoolConstants.secondsAgo
-                ),
+                OracleLibrary.oracleSqrtPriceX96(oracleTickCumulativeDelta, PoolConstants.secondsAgo),
                 params.maintenance
             );
-            safeMarginMinimum = _safeMarginMinimum(
-                position,
-                params.maintenance,
-                oracleTickCumulativeDelta
-            );
+            safeMarginMinimum = _safeMarginMinimum(position, params.maintenance, oracleTickCumulativeDelta);
         }
     }
 
@@ -303,9 +256,7 @@ contract Quoter is
             uint128 liquidityLockedAfter
         )
     {
-        (, uint96 positionId, , , , , , , , ) = manager.positions(
-            params.tokenId
-        );
+        (, uint96 positionId, , , , , , , , ) = manager.positions(params.tokenId);
         IMarginalV1Pool pool = getPool(
             PoolAddress.PoolKey({
                 token0: params.token0,
@@ -325,9 +276,7 @@ contract Quoter is
             ,
 
         ) = getStateSynced(address(pool));
-        int56[] memory oracleTickCumulativesLast = getOracleSynced(
-            address(pool)
-        );
+        int56[] memory oracleTickCumulativesLast = getOracleSynced(address(pool));
         PositionLibrary.Info memory position = _getPositionInfoSynced(
             address(pool),
             positionId,
@@ -339,55 +288,36 @@ contract Quoter is
 
         uint128 liquidityLocked = pool.liquidityLocked();
         liquidityLockedAfter = liquidityLocked - position.liquidityLocked;
-        (uint256 amount0Unlocked, uint256 amount1Unlocked) = PositionLibrary
-            .amountsLocked(position);
+        (uint256 amount0Unlocked, uint256 amount1Unlocked) = PositionLibrary.amountsLocked(position);
 
         rewards = position.rewards;
 
         int256 amount0;
         int256 amount1;
         if (!position.zeroForOne) {
-            amount0 = -int256(
-                uint256(position.size) + uint256(position.margin)
-            ); // size + margin out
+            amount0 = -int256(uint256(position.size) + uint256(position.margin)); // size + margin out
             amount1 = int256(uint256(position.debt1)); // debt in
 
-            (liquidityAfter, sqrtPriceX96After) = LiquidityMath
-                .liquiditySqrtPriceX96Next(
-                    liquidity,
-                    sqrtPriceX96,
-                    int256(
-                        amount0Unlocked -
-                            uint256(position.size) -
-                            uint256(position.margin)
-                    ), // insurance0 + debt0
-                    int256(amount1Unlocked) + amount1 // insurance1 + debt1
-                );
+            (liquidityAfter, sqrtPriceX96After) = LiquidityMath.liquiditySqrtPriceX96Next(
+                liquidity,
+                sqrtPriceX96,
+                int256(amount0Unlocked - uint256(position.size) - uint256(position.margin)), // insurance0 + debt0
+                int256(amount1Unlocked) + amount1 // insurance1 + debt1
+            );
         } else {
             amount0 = int256(uint256(position.debt0)); // debt in
-            amount1 = -int256(
-                uint256(position.size) + uint256(position.margin)
-            ); // size + margin out
+            amount1 = -int256(uint256(position.size) + uint256(position.margin)); // size + margin out
 
-            (liquidityAfter, sqrtPriceX96After) = LiquidityMath
-                .liquiditySqrtPriceX96Next(
-                    liquidity,
-                    sqrtPriceX96,
-                    int256(amount0Unlocked) + amount0, // insurance0 + debt0
-                    int256(
-                        amount1Unlocked -
-                            uint256(position.size) -
-                            uint256(position.margin)
-                    ) // insurance1 + debt1
-                );
+            (liquidityAfter, sqrtPriceX96After) = LiquidityMath.liquiditySqrtPriceX96Next(
+                liquidity,
+                sqrtPriceX96,
+                int256(amount0Unlocked) + amount0, // insurance0 + debt0
+                int256(amount1Unlocked - uint256(position.size) - uint256(position.margin)) // insurance1 + debt1
+            );
         }
 
-        amountIn = amount0 > 0
-            ? uint256(amount0)
-            : (amount1 > 0 ? uint256(amount1) : 0);
-        amountOut = amount0 < 0
-            ? uint256(-amount0)
-            : (amount1 < 0 ? uint256(-amount1) : 0);
+        amountIn = amount0 > 0 ? uint256(amount0) : (amount1 > 0 ? uint256(amount1) : 0);
+        amountOut = amount0 < 0 ? uint256(-amount0) : (amount1 < 0 ? uint256(-amount1) : 0);
     }
 
     /// @inheritdoc IQuoter
@@ -405,9 +335,7 @@ contract Quoter is
             uint128 liquidityLockedAfter
         )
     {
-        (, uint96 positionId, , , , , , , , ) = manager.positions(
-            params.tokenId
-        );
+        (, uint96 positionId, , , , , , , , ) = manager.positions(params.tokenId);
         IMarginalV1Pool pool = getPool(
             PoolAddress.PoolKey({
                 token0: params.token0,
@@ -427,9 +355,7 @@ contract Quoter is
             ,
 
         ) = getStateSynced(address(pool));
-        int56[] memory oracleTickCumulativesLast = getOracleSynced(
-            address(pool)
-        );
+        int56[] memory oracleTickCumulativesLast = getOracleSynced(address(pool));
         PositionLibrary.Info memory position = _getPositionInfoSynced(
             address(pool),
             positionId,
@@ -441,53 +367,36 @@ contract Quoter is
 
         uint128 liquidityLocked = pool.liquidityLocked();
         liquidityLockedAfter = liquidityLocked - position.liquidityLocked;
-        (uint256 amount0Unlocked, uint256 amount1Unlocked) = PositionLibrary
-            .amountsLocked(position);
+        (uint256 amount0Unlocked, uint256 amount1Unlocked) = PositionLibrary.amountsLocked(position);
 
         rewards = position.rewards;
 
         int256 amount0;
         int256 amount1;
         if (!position.zeroForOne) {
-            amount0 = -int256(
-                uint256(position.size) + uint256(position.margin)
-            ); // size + margin out
+            amount0 = -int256(uint256(position.size) + uint256(position.margin)); // size + margin out
             amount1 = int256(uint256(position.debt1)); // debt in
 
-            (liquidityAfter, sqrtPriceX96After) = LiquidityMath
-                .liquiditySqrtPriceX96Next(
-                    liquidity,
-                    sqrtPriceX96,
-                    int256(
-                        amount0Unlocked -
-                            uint256(position.size) -
-                            uint256(position.margin)
-                    ), // insurance0 + debt0
-                    int256(amount1Unlocked) + amount1 // insurance1 + debt1
-                );
+            (liquidityAfter, sqrtPriceX96After) = LiquidityMath.liquiditySqrtPriceX96Next(
+                liquidity,
+                sqrtPriceX96,
+                int256(amount0Unlocked - uint256(position.size) - uint256(position.margin)), // insurance0 + debt0
+                int256(amount1Unlocked) + amount1 // insurance1 + debt1
+            );
         } else {
             amount0 = int256(uint256(position.debt0)); // debt in
-            amount1 = -int256(
-                uint256(position.size) + uint256(position.margin)
-            ); // size + margin out
+            amount1 = -int256(uint256(position.size) + uint256(position.margin)); // size + margin out
 
-            (liquidityAfter, sqrtPriceX96After) = LiquidityMath
-                .liquiditySqrtPriceX96Next(
-                    liquidity,
-                    sqrtPriceX96,
-                    int256(amount0Unlocked) + amount0, // insurance0 + debt0
-                    int256(
-                        amount1Unlocked -
-                            uint256(position.size) -
-                            uint256(position.margin)
-                    ) // insurance1 + debt1
-                );
+            (liquidityAfter, sqrtPriceX96After) = LiquidityMath.liquiditySqrtPriceX96Next(
+                liquidity,
+                sqrtPriceX96,
+                int256(amount0Unlocked) + amount0, // insurance0 + debt0
+                int256(amount1Unlocked - uint256(position.size) - uint256(position.margin)) // insurance1 + debt1
+            );
         }
 
         // unadjusted for swap on oracle pool to repay debt to Marginal v1 pool
-        amountOut = amount0 < 0
-            ? uint256(-amount0)
-            : (amount1 < 0 ? uint256(-amount1) : 0);
+        amountOut = amount0 < 0 ? uint256(-amount0) : (amount1 < 0 ? uint256(-amount1) : 0);
 
         // if token out is WETH9, liquidation rewards wrapped and used on oracle swap
         address tokenOut = !position.zeroForOne ? params.token0 : params.token1;
@@ -499,21 +408,14 @@ contract Quoter is
             params.oracle,
             oracleZeroForOne,
             (oracleZeroForOne ? -amount1 : -amount0),
-            (
-                oracleZeroForOne
-                    ? TickMath.MIN_SQRT_RATIO + 1
-                    : TickMath.MAX_SQRT_RATIO - 1
-            )
+            (oracleZeroForOne ? TickMath.MIN_SQRT_RATIO + 1 : TickMath.MAX_SQRT_RATIO - 1)
         );
 
-        uint256 oracleAmountIn = (
-            oracleZeroForOne ? uint256(oracleAmount0) : uint256(oracleAmount1)
-        );
+        uint256 oracleAmountIn = (oracleZeroForOne ? uint256(oracleAmount0) : uint256(oracleAmount1));
         if (amountOut < oracleAmountIn) revert("IIA"); // Uniswap v3 pool error for not enough balance in on swap
 
         amountOut -= oracleAmountIn;
-        if (amountOut < params.amountOutMinimum)
-            revert("Amount out less than min");
+        if (amountOut < params.amountOutMinimum) revert("Amount out less than min");
     }
 
     /// @inheritdoc IQuoter
@@ -523,11 +425,7 @@ contract Quoter is
         public
         view
         checkDeadline(params.deadline)
-        returns (
-            uint256 amountOut,
-            uint128 liquidityAfter,
-            uint160 sqrtPriceX96After
-        )
+        returns (uint256 amountOut, uint128 liquidityAfter, uint160 sqrtPriceX96After)
     {
         bool zeroForOne = params.tokenIn < params.tokenOut;
         IMarginalV1Pool pool = getPool(
@@ -539,65 +437,35 @@ contract Quoter is
             })
         );
 
-        (
-            uint160 sqrtPriceX96,
-            ,
-            uint128 liquidity,
-            ,
-            ,
-            ,
-            uint8 feeProtocol,
-            bool initialized
-        ) = pool.state();
+        (uint160 sqrtPriceX96, , uint128 liquidity, , , , uint8 feeProtocol, bool initialized) = pool.state();
         if (!initialized) revert("Not initialized");
 
         uint160 sqrtPriceLimitX96 = params.sqrtPriceLimitX96 == 0
-            ? (
-                zeroForOne
-                    ? TickMath.MIN_SQRT_RATIO + 1
-                    : TickMath.MAX_SQRT_RATIO - 1
-            )
+            ? (zeroForOne ? TickMath.MIN_SQRT_RATIO + 1 : TickMath.MAX_SQRT_RATIO - 1)
             : params.sqrtPriceLimitX96;
 
-        if (
-            params.amountIn == 0 || params.amountIn >= uint256(type(int256).max)
-        ) revert("Invalid amountIn");
+        if (params.amountIn == 0 || params.amountIn >= uint256(type(int256).max)) revert("Invalid amountIn");
         int256 amountSpecified = int256(params.amountIn);
 
         if (
             zeroForOne
-                ? !(sqrtPriceLimitX96 < sqrtPriceX96 &&
-                    sqrtPriceLimitX96 > SqrtPriceMath.MIN_SQRT_RATIO)
-                : !(sqrtPriceLimitX96 > sqrtPriceX96 &&
-                    sqrtPriceLimitX96 < SqrtPriceMath.MAX_SQRT_RATIO)
+                ? !(sqrtPriceLimitX96 < sqrtPriceX96 && sqrtPriceLimitX96 > SqrtPriceMath.MIN_SQRT_RATIO)
+                : !(sqrtPriceLimitX96 > sqrtPriceX96 && sqrtPriceLimitX96 < SqrtPriceMath.MAX_SQRT_RATIO)
         ) revert("Invalid sqrtPriceLimitX96");
 
         int256 amountSpecifiedLessFee = amountSpecified -
-            int256(
-                SwapMath.swapFees(
-                    uint256(amountSpecified),
-                    PoolConstants.fee,
-                    false
-                )
-            );
+            int256(SwapMath.swapFees(uint256(amountSpecified), PoolConstants.fee, false));
         uint160 sqrtPriceX96Next = SqrtPriceMath.sqrtPriceX96NextSwap(
             liquidity,
             sqrtPriceX96,
             zeroForOne,
             amountSpecifiedLessFee
         );
-        if (
-            zeroForOne
-                ? sqrtPriceX96Next < sqrtPriceLimitX96
-                : sqrtPriceX96Next > sqrtPriceLimitX96
-        ) revert("sqrtPriceX96Next exceeds limit");
+        if (zeroForOne ? sqrtPriceX96Next < sqrtPriceLimitX96 : sqrtPriceX96Next > sqrtPriceLimitX96)
+            revert("sqrtPriceX96Next exceeds limit");
 
         // amounts without fees
-        (int256 amount0, int256 amount1) = SwapMath.swapAmounts(
-            liquidity,
-            sqrtPriceX96,
-            sqrtPriceX96Next
-        );
+        (int256 amount0, int256 amount1) = SwapMath.swapAmounts(liquidity, sqrtPriceX96, sqrtPriceX96Next);
         amountOut = uint256(-(zeroForOne ? amount1 : amount0));
         if (amountOut < params.amountOutMinimum) revert("Too little received");
 
@@ -608,13 +476,12 @@ contract Quoter is
         if (feeProtocol > 0) amountIn -= uint256(fees / feeProtocol);
 
         // calculate liquidity, sqrtP after
-        (liquidityAfter, sqrtPriceX96After) = LiquidityMath
-            .liquiditySqrtPriceX96Next(
-                liquidity,
-                sqrtPriceX96,
-                zeroForOne ? int256(amountIn) : -int256(amountOut),
-                zeroForOne ? -int256(amountOut) : int256(amountIn)
-            );
+        (liquidityAfter, sqrtPriceX96After) = LiquidityMath.liquiditySqrtPriceX96Next(
+            liquidity,
+            sqrtPriceX96,
+            zeroForOne ? int256(amountIn) : -int256(amountOut),
+            zeroForOne ? -int256(amountOut) : int256(amountIn)
+        );
     }
 
     /// @inheritdoc IQuoter
@@ -623,11 +490,7 @@ contract Quoter is
     )
         external
         view
-        returns (
-            uint256 amountOut,
-            uint128[] memory liquiditiesAfter,
-            uint160[] memory sqrtPricesX96After
-        )
+        returns (uint256 amountOut, uint128[] memory liquiditiesAfter, uint160[] memory sqrtPricesX96After)
     {
         uint256 numPools = params.path.numPools();
         liquiditiesAfter = new uint128[](numPools);
@@ -636,17 +499,8 @@ contract Quoter is
         uint256 i;
         while (true) {
             bool hasMultiplePools = params.path.hasMultiplePools();
-            (
-                address tokenIn,
-                address tokenOut,
-                uint24 maintenance,
-                address oracle
-            ) = params.path.decodeFirstPool();
-            (
-                params.amountIn,
-                liquiditiesAfter[i],
-                sqrtPricesX96After[i]
-            ) = quoteExactInputSingle(
+            (address tokenIn, address tokenOut, uint24 maintenance, address oracle) = params.path.decodeFirstPool();
+            (params.amountIn, liquiditiesAfter[i], sqrtPricesX96After[i]) = quoteExactInputSingle(
                 IRouter.ExactInputSingleParams({
                     tokenIn: tokenIn,
                     tokenOut: tokenOut,
@@ -680,11 +534,7 @@ contract Quoter is
         public
         view
         checkDeadline(params.deadline)
-        returns (
-            uint256 amountIn,
-            uint128 liquidityAfter,
-            uint160 sqrtPriceX96After
-        )
+        returns (uint256 amountIn, uint128 liquidityAfter, uint160 sqrtPriceX96After)
     {
         bool zeroForOne = params.tokenIn < params.tokenOut;
         IMarginalV1Pool pool = getPool(
@@ -696,38 +546,20 @@ contract Quoter is
             })
         );
 
-        (
-            uint160 sqrtPriceX96,
-            ,
-            uint128 liquidity,
-            ,
-            ,
-            ,
-            uint8 feeProtocol,
-            bool initialized
-        ) = pool.state();
+        (uint160 sqrtPriceX96, , uint128 liquidity, , , , uint8 feeProtocol, bool initialized) = pool.state();
         if (!initialized) revert("Not initialized");
 
         uint160 sqrtPriceLimitX96 = params.sqrtPriceLimitX96 == 0
-            ? (
-                zeroForOne
-                    ? TickMath.MIN_SQRT_RATIO + 1
-                    : TickMath.MAX_SQRT_RATIO - 1
-            )
+            ? (zeroForOne ? TickMath.MIN_SQRT_RATIO + 1 : TickMath.MAX_SQRT_RATIO - 1)
             : params.sqrtPriceLimitX96;
 
-        if (
-            params.amountOut == 0 ||
-            params.amountOut >= uint256(type(int256).max)
-        ) revert("Invalid amountOut");
+        if (params.amountOut == 0 || params.amountOut >= uint256(type(int256).max)) revert("Invalid amountOut");
         int256 amountSpecified = -int256(params.amountOut);
 
         if (
             zeroForOne
-                ? !(sqrtPriceLimitX96 < sqrtPriceX96 &&
-                    sqrtPriceLimitX96 > SqrtPriceMath.MIN_SQRT_RATIO)
-                : !(sqrtPriceLimitX96 > sqrtPriceX96 &&
-                    sqrtPriceLimitX96 < SqrtPriceMath.MAX_SQRT_RATIO)
+                ? !(sqrtPriceLimitX96 < sqrtPriceX96 && sqrtPriceLimitX96 > SqrtPriceMath.MIN_SQRT_RATIO)
+                : !(sqrtPriceLimitX96 > sqrtPriceX96 && sqrtPriceLimitX96 < SqrtPriceMath.MAX_SQRT_RATIO)
         ) revert("Invalid sqrtPriceLimitX96");
 
         uint160 sqrtPriceX96Next = SqrtPriceMath.sqrtPriceX96NextSwap(
@@ -736,27 +568,16 @@ contract Quoter is
             zeroForOne,
             amountSpecified
         );
-        if (
-            zeroForOne
-                ? sqrtPriceX96Next < sqrtPriceLimitX96
-                : sqrtPriceX96Next > sqrtPriceLimitX96
-        ) revert("sqrtPriceX96Next exceeds limit");
+        if (zeroForOne ? sqrtPriceX96Next < sqrtPriceLimitX96 : sqrtPriceX96Next > sqrtPriceLimitX96)
+            revert("sqrtPriceX96Next exceeds limit");
 
         // amounts without fees
-        (int256 amount0, int256 amount1) = SwapMath.swapAmounts(
-            liquidity,
-            sqrtPriceX96,
-            sqrtPriceX96Next
-        );
+        (int256 amount0, int256 amount1) = SwapMath.swapAmounts(liquidity, sqrtPriceX96, sqrtPriceX96Next);
         uint256 amountOut = uint256(-amountSpecified);
 
         // account for protocol fees if turned on
         uint256 amountInLessFee = uint256(zeroForOne ? amount0 : amount1);
-        uint256 fees = SwapMath.swapFees(
-            amountInLessFee,
-            PoolConstants.fee,
-            true
-        );
+        uint256 fees = SwapMath.swapFees(amountInLessFee, PoolConstants.fee, true);
         amountIn = amountInLessFee + fees; // amount in required of swapper to send
         if (amountIn > params.amountInMaximum) revert("Too much requested");
 
@@ -765,27 +586,18 @@ contract Quoter is
         if (feeProtocol > 0) amountInToPool -= uint256(fees / feeProtocol);
 
         // calculate liquidity, sqrtP after
-        (liquidityAfter, sqrtPriceX96After) = LiquidityMath
-            .liquiditySqrtPriceX96Next(
-                liquidity,
-                sqrtPriceX96,
-                zeroForOne ? int256(amountInToPool) : -int256(amountOut),
-                zeroForOne ? -int256(amountOut) : int256(amountInToPool)
-            );
+        (liquidityAfter, sqrtPriceX96After) = LiquidityMath.liquiditySqrtPriceX96Next(
+            liquidity,
+            sqrtPriceX96,
+            zeroForOne ? int256(amountInToPool) : -int256(amountOut),
+            zeroForOne ? -int256(amountOut) : int256(amountInToPool)
+        );
     }
 
     /// @inheritdoc IQuoter
     function quoteExactOutput(
         IRouter.ExactOutputParams memory params
-    )
-        external
-        view
-        returns (
-            uint256 amountIn,
-            uint128[] memory liquiditiesAfter,
-            uint160[] memory sqrtPricesX96After
-        )
-    {
+    ) external view returns (uint256 amountIn, uint128[] memory liquiditiesAfter, uint160[] memory sqrtPricesX96After) {
         uint256 numPools = params.path.numPools();
         liquiditiesAfter = new uint128[](numPools);
         sqrtPricesX96After = new uint160[](numPools);
@@ -793,17 +605,8 @@ contract Quoter is
         uint256 i;
         while (true) {
             bool hasMultiplePools = params.path.hasMultiplePools();
-            (
-                address tokenOut,
-                address tokenIn,
-                uint24 maintenance,
-                address oracle
-            ) = params.path.decodeFirstPool();
-            (
-                params.amountOut,
-                liquiditiesAfter[i],
-                sqrtPricesX96After[i]
-            ) = quoteExactOutputSingle(
+            (address tokenOut, address tokenIn, uint24 maintenance, address oracle) = params.path.decodeFirstPool();
+            (params.amountOut, liquiditiesAfter[i], sqrtPricesX96After[i]) = quoteExactOutputSingle(
                 IRouter.ExactOutputSingleParams({
                     tokenIn: tokenIn,
                     tokenOut: tokenOut,
@@ -837,12 +640,7 @@ contract Quoter is
         external
         view
         checkDeadline(params.deadline)
-        returns (
-            uint256 shares,
-            uint256 amount0,
-            uint256 amount1,
-            uint128 liquidityAfter
-        )
+        returns (uint256 shares, uint256 amount0, uint256 amount1, uint128 liquidityAfter)
     {
         IMarginalV1Pool pool = getPool(
             PoolAddress.PoolKey({
@@ -853,16 +651,7 @@ contract Quoter is
             })
         );
 
-        (
-            uint160 sqrtPriceX96,
-            ,
-            uint128 liquidity,
-            ,
-            ,
-            ,
-            ,
-            bool initialized
-        ) = pool.state();
+        (uint160 sqrtPriceX96, , uint128 liquidity, , , , , bool initialized) = pool.state();
         if (!initialized) revert("Pool not initialized");
 
         uint128 liquidityDelta = LiquidityAmounts.getLiquidityForAmounts(
@@ -876,26 +665,17 @@ contract Quoter is
         uint256 totalSupply = pool.totalSupply();
         uint128 liquidityLocked = pool.liquidityLocked();
 
-        (amount0, amount1) = LiquidityMath.toAmounts(
-            liquidityDelta,
-            sqrtPriceX96
-        );
+        (amount0, amount1) = LiquidityMath.toAmounts(liquidityDelta, sqrtPriceX96);
         amount0 += 1;
         amount1 += 1;
 
         if (amount0 < params.amount0Min) revert("amount0 less than min");
         if (amount1 < params.amount1Min) revert("amount1 less than min");
 
-        uint128 totalLiquidityAfter = liquidity +
-            liquidityLocked +
-            liquidityDelta;
+        uint128 totalLiquidityAfter = liquidity + liquidityLocked + liquidityDelta;
         shares = totalSupply == 0
             ? totalLiquidityAfter
-            : Math.mulDiv(
-                totalSupply,
-                liquidityDelta,
-                totalLiquidityAfter - liquidityDelta
-            );
+            : Math.mulDiv(totalSupply, liquidityDelta, totalLiquidityAfter - liquidityDelta);
 
         liquidityAfter = liquidity + liquidityDelta;
     }
@@ -907,12 +687,7 @@ contract Quoter is
         external
         view
         checkDeadline(params.deadline)
-        returns (
-            uint128 liquidityDelta,
-            uint256 amount0,
-            uint256 amount1,
-            uint128 liquidityAfter
-        )
+        returns (uint128 liquidityDelta, uint256 amount0, uint256 amount1, uint128 liquidityAfter)
     {
         IMarginalV1Pool pool = getPool(
             PoolAddress.PoolKey({
@@ -923,35 +698,20 @@ contract Quoter is
             })
         );
 
-        (
-            uint160 sqrtPriceX96,
-            ,
-            uint128 liquidity,
-            ,
-            ,
-            ,
-            ,
-            bool initialized
-        ) = pool.state();
+        (uint160 sqrtPriceX96, , uint128 liquidity, , , , , bool initialized) = pool.state();
         if (!initialized) revert("Not initialized");
 
         // cache needed pool state
         uint256 totalSupply = pool.totalSupply();
         uint128 liquidityLocked = pool.liquidityLocked();
 
-        if (params.shares == 0 || params.shares > totalSupply)
-            revert("Invalid shares");
+        if (params.shares == 0 || params.shares > totalSupply) revert("Invalid shares");
 
         uint128 totalLiquidityBefore = liquidity + liquidityLocked;
-        liquidityDelta = uint128(
-            Math.mulDiv(totalLiquidityBefore, params.shares, totalSupply)
-        );
+        liquidityDelta = uint128(Math.mulDiv(totalLiquidityBefore, params.shares, totalSupply));
         if (liquidityDelta > liquidity) revert("Invalid liquidityDelta");
 
-        (amount0, amount1) = LiquidityMath.toAmounts(
-            liquidityDelta,
-            sqrtPriceX96
-        );
+        (amount0, amount1) = LiquidityMath.toAmounts(liquidityDelta, sqrtPriceX96);
         if (amount0 < params.amount0Min) revert("amount0 less than min");
         if (amount1 < params.amount1Min) revert("amount1 less than min");
 

@@ -40,7 +40,7 @@ contract MarginalV1LPBacktest is Backtest {
     /// @notice Reports the current liquidity and associated token0 and token1 amounts for LP shares held
     /// @return values_ The current LP held liquidity and token0, token1 amounts in addition to the pool sqrtPriceX96
     function values() public view virtual override returns (uint256[] memory values_) {
-        values_ = new uint256[](4);
+        values_ = new uint256[](6);
         (
             uint160 sqrtPriceX96, // pool state sqrt price
             ,
@@ -60,9 +60,11 @@ contract MarginalV1LPBacktest is Backtest {
         (uint256 amount0, uint256 amount1) = LiquidityMath.toAmounts(_liquidity, sqrtPriceX96);
 
         // set the values to track through backtest
-        values_[0] = uint256(_liquidity);
+        values_[0] = uint256(liquidity);
         values_[1] = uint256(sqrtPriceX96);
-        values_[2] = amount0;
-        values_[3] = amount1;
+        values_[2] = uint256(liquidityLocked);
+        values_[3] = _liquidity; // LP share of total liquidity
+        values_[4] = amount0;
+        values_[5] = amount1;
     }
 }

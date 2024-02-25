@@ -51,17 +51,8 @@ contract NonfungiblePositionManager is
         uint256 fees,
         uint256 rewards
     );
-    event Lock(
-        uint256 indexed tokenId,
-        address indexed sender,
-        uint256 marginAfter
-    );
-    event Free(
-        uint256 indexed tokenId,
-        address indexed sender,
-        address recipient,
-        uint256 marginAfter
-    );
+    event Lock(uint256 indexed tokenId, address indexed sender, uint256 marginAfter);
+    event Free(uint256 indexed tokenId, address indexed sender, address recipient, uint256 marginAfter);
     event Burn(
         uint256 indexed tokenId,
         address indexed sender,
@@ -84,10 +75,7 @@ contract NonfungiblePositionManager is
     constructor(
         address _factory,
         address _WETH9
-    )
-        ERC721("Marginal V1 Position Token", "MRGLV1-POS")
-        PeripheryImmutableState(_factory, _WETH9)
-    {}
+    ) ERC721("Marginal V1 Position Token", "MRGLV1-POS") PeripheryImmutableState(_factory, _WETH9) {}
 
     // TODO: tokenURI
 
@@ -114,16 +102,11 @@ contract NonfungiblePositionManager is
         Position memory position = _positions[tokenId];
         pool = position.pool;
         positionId = position.id;
-        (
-            zeroForOne,
-            size,
-            debt,
-            margin,
-            safeMarginMinimum,
-            liquidated,
-            safe,
-            rewards
-        ) = getPositionSynced(pool, address(this), positionId);
+        (zeroForOne, size, debt, margin, safeMarginMinimum, liquidated, safe, rewards) = getPositionSynced(
+            pool,
+            address(this),
+            positionId
+        );
     }
 
     /// @inheritdoc INonfungiblePositionManager
@@ -133,14 +116,7 @@ contract NonfungiblePositionManager is
         external
         payable
         checkDeadline(params.deadline)
-        returns (
-            uint256 tokenId,
-            uint256 size,
-            uint256 debt,
-            uint256 margin,
-            uint256 fees,
-            uint256 rewards
-        )
+        returns (uint256 tokenId, uint256 size, uint256 debt, uint256 margin, uint256 fees, uint256 rewards)
     {
         IMarginalV1Pool pool = getPool(
             PoolAddress.PoolKey({
@@ -171,57 +147,30 @@ contract NonfungiblePositionManager is
                 zeroForOne: params.zeroForOne,
                 liquidityDelta: liquidityDelta,
                 sqrtPriceLimitX96: params.sqrtPriceLimitX96 == 0
-                    ? (
-                        params.zeroForOne
-                            ? TickMath.MIN_SQRT_RATIO + 1
-                            : TickMath.MAX_SQRT_RATIO - 1
-                    )
+                    ? (params.zeroForOne ? TickMath.MIN_SQRT_RATIO + 1 : TickMath.MAX_SQRT_RATIO - 1)
                     : params.sqrtPriceLimitX96,
                 margin: params.margin,
                 sizeMinimum: params.sizeMinimum,
-                debtMaximum: params.debtMaximum == 0
-                    ? type(uint128).max
-                    : params.debtMaximum,
-                amountInMaximum: params.amountInMaximum == 0
-                    ? type(uint256).max
-                    : params.amountInMaximum
+                debtMaximum: params.debtMaximum == 0 ? type(uint128).max : params.debtMaximum,
+                amountInMaximum: params.amountInMaximum == 0 ? type(uint256).max : params.amountInMaximum
             })
         );
 
         // @dev ok to call before set position since _safeMint not used so no callback
         _mint(params.recipient, (tokenId = _nextId++));
 
-        _positions[tokenId] = Position({
-            pool: address(pool),
-            id: uint96(positionId)
-        });
+        _positions[tokenId] = Position({pool: address(pool), id: uint96(positionId)});
 
         // refund any excess ETH from escrowed rewards to sender at end of function to avoid re-entrancy with fallback
         refundETH();
 
-        emit Mint(
-            tokenId,
-            msg.sender,
-            params.recipient,
-            positionId,
-            size,
-            debt,
-            margin,
-            fees,
-            rewards
-        );
+        emit Mint(tokenId, msg.sender, params.recipient, positionId, size, debt, margin, fees, rewards);
     }
 
     /// @inheritdoc INonfungiblePositionManager
     function lock(
         LockParams calldata params
-    )
-        external
-        payable
-        onlyApprovedOrOwner(params.tokenId)
-        checkDeadline(params.deadline)
-        returns (uint256 margin)
-    {
+    ) external payable onlyApprovedOrOwner(params.tokenId) checkDeadline(params.deadline) returns (uint256 margin) {
         Position memory position = _positions[params.tokenId];
         if (
             address(
@@ -255,12 +204,7 @@ contract NonfungiblePositionManager is
     /// @inheritdoc INonfungiblePositionManager
     function free(
         FreeParams calldata params
-    )
-        external
-        onlyApprovedOrOwner(params.tokenId)
-        checkDeadline(params.deadline)
-        returns (uint256 margin)
-    {
+    ) external onlyApprovedOrOwner(params.tokenId) checkDeadline(params.deadline) returns (uint256 margin) {
         Position memory position = _positions[params.tokenId];
         if (
             address(
@@ -329,21 +273,10 @@ contract NonfungiblePositionManager is
                 id: position.id
             })
         );
-        amountIn = amount0 > 0
-            ? uint256(amount0)
-            : (amount1 > 0 ? uint256(amount1) : 0);
-        amountOut = amount0 < 0
-            ? uint256(-amount0)
-            : (amount1 < 0 ? uint256(-amount1) : 0);
+        amountIn = amount0 > 0 ? uint256(amount0) : (amount1 > 0 ? uint256(amount1) : 0);
+        amountOut = amount0 < 0 ? uint256(-amount0) : (amount1 < 0 ? uint256(-amount1) : 0);
 
-        emit Burn(
-            params.tokenId,
-            msg.sender,
-            params.recipient,
-            amountIn,
-            amountOut,
-            rewards
-        );
+        emit Burn(params.tokenId, msg.sender, params.recipient, amountIn, amountOut, rewards);
     }
 
     /// @inheritdoc INonfungiblePositionManager
@@ -385,12 +318,6 @@ contract NonfungiblePositionManager is
             })
         );
 
-        emit Ignite(
-            params.tokenId,
-            msg.sender,
-            params.recipient,
-            amountOut,
-            rewards
-        );
+        emit Ignite(params.tokenId, msg.sender, params.recipient, amountOut, rewards);
     }
 }

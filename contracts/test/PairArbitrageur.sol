@@ -37,18 +37,14 @@ contract PairArbitrageur is
     uint160 private constant DEFAULT_SQRT_PRICE_LIMIT_X96_CACHED = 0;
 
     /// @dev Transient storage variable used for returning the computed amount in for an exact output swap.
-    uint160 private sqrtPriceLimit1X96Cached =
-        DEFAULT_SQRT_PRICE_LIMIT_X96_CACHED;
+    uint160 private sqrtPriceLimit1X96Cached = DEFAULT_SQRT_PRICE_LIMIT_X96_CACHED;
 
     error PoolNotInitialized();
     error PoolInvalid();
     error ArbitrageNotAvailable();
     error AmountOutLessThanMin(uint256 amountOut);
 
-    constructor(
-        address _factory,
-        address _WETH9
-    ) PeripheryImmutableState(_factory, _WETH9) {}
+    constructor(address _factory, address _WETH9) PeripheryImmutableState(_factory, _WETH9) {}
 
     struct SwapCallbackData {
         bytes path;
@@ -56,26 +52,11 @@ contract PairArbitrageur is
     }
 
     /// @inheritdoc IMarginalV1SwapCallback
-    function marginalV1SwapCallback(
-        int256 amount0Delta,
-        int256 amount1Delta,
-        bytes calldata _data
-    ) external override {
+    function marginalV1SwapCallback(int256 amount0Delta, int256 amount1Delta, bytes calldata _data) external override {
         require(amount0Delta > 0 || amount1Delta > 0); // swaps entirely within 0-liquidity regions are not supported
         SwapCallbackData memory data = abi.decode(_data, (SwapCallbackData));
-        (
-            address tokenIn,
-            address tokenOut,
-            uint24 maintenance,
-            address oracle
-        ) = Path.decodeFirstPool(data.path);
-        CallbackValidation.verifyCallback(
-            factory,
-            tokenIn,
-            tokenOut,
-            maintenance,
-            oracle
-        );
+        (address tokenIn, address tokenOut, uint24 maintenance, address oracle) = Path.decodeFirstPool(data.path);
+        CallbackValidation.verifyCallback(factory, tokenIn, tokenOut, maintenance, oracle);
 
         (bool isExactInput, uint256 amountToPay) = amount0Delta > 0
             ? (tokenIn < tokenOut, uint256(amount0Delta))
@@ -97,12 +78,7 @@ contract PairArbitrageur is
 
             uint24 uniswapV3Fee = IUniswapV3Pool(oracle).fee();
             SwapCallbackData memory data_ = SwapCallbackData({
-                path: abi.encodePacked(
-                    tokenIn_,
-                    maintenance,
-                    oracle,
-                    tokenOut_
-                ),
+                path: abi.encodePacked(tokenIn_, maintenance, oracle, tokenOut_),
                 payer: data.payer
             });
             IUniswapV3Pool(oracle).swap(
@@ -110,11 +86,7 @@ contract PairArbitrageur is
                 zeroForOne,
                 amountSpecified,
                 sqrtPriceLimit1X96Cached == 0
-                    ? (
-                        zeroForOne
-                            ? TickMath.MIN_SQRT_RATIO + 1
-                            : TickMath.MAX_SQRT_RATIO - 1
-                    )
+                    ? (zeroForOne ? TickMath.MIN_SQRT_RATIO + 1 : TickMath.MAX_SQRT_RATIO - 1)
                     : sqrtPriceLimit1X96Cached,
                 abi.encode(data_)
             );
@@ -127,26 +99,12 @@ contract PairArbitrageur is
     }
 
     /// @inheritdoc IUniswapV3SwapCallback
-    function uniswapV3SwapCallback(
-        int256 amount0Delta,
-        int256 amount1Delta,
-        bytes calldata _data
-    ) external override {
+    function uniswapV3SwapCallback(int256 amount0Delta, int256 amount1Delta, bytes calldata _data) external override {
         require(amount0Delta > 0 || amount1Delta > 0); // swaps entirely within 0-liquidity regions are not supported
         SwapCallbackData memory data = abi.decode(_data, (SwapCallbackData));
-        (
-            address tokenIn,
-            address tokenOut,
-            uint24 maintenance,
-            address oracle
-        ) = Path.decodeFirstPool(data.path);
+        (address tokenIn, address tokenOut, uint24 maintenance, address oracle) = Path.decodeFirstPool(data.path);
 
-        PoolAddress.PoolKey memory key = PoolAddress.getPoolKey(
-            tokenIn,
-            tokenOut,
-            maintenance,
-            oracle
-        );
+        PoolAddress.PoolKey memory key = PoolAddress.getPoolKey(tokenIn, tokenOut, maintenance, oracle);
         CallbackValidation.verifyUniswapV3Callback(factory, key);
 
         (bool isExactInput, uint256 amountToPay) = amount0Delta > 0
@@ -183,11 +141,7 @@ contract PairArbitrageur is
                 zeroForOne,
                 amountSpecified,
                 sqrtPriceLimit1X96Cached == 0
-                    ? (
-                        zeroForOne
-                            ? TickMath.MIN_SQRT_RATIO + 1
-                            : TickMath.MAX_SQRT_RATIO - 1
-                    )
+                    ? (zeroForOne ? TickMath.MIN_SQRT_RATIO + 1 : TickMath.MAX_SQRT_RATIO - 1)
                     : sqrtPriceLimit1X96Cached,
                 abi.encode(data_)
             );
@@ -218,39 +172,17 @@ contract PairArbitrageur is
     /// Also ignores fees in calculation for size to arb with.
     function execute(
         ExecuteParams calldata params
-    )
-        external
-        payable
-        checkDeadline(params.deadline)
-        returns (uint256 amountOut)
-    {
+    ) external payable checkDeadline(params.deadline) returns (uint256 amountOut) {
         require(params.token0 < params.token1);
-        require(
-            params.tokenOut == params.token0 || params.tokenOut == params.token1
-        );
+        require(params.tokenOut == params.token0 || params.tokenOut == params.token1);
         address pool = PoolAddress.getAddress(
             factory,
-            PoolAddress.getPoolKey(
-                params.token0,
-                params.token1,
-                params.maintenance,
-                params.oracle
-            )
+            PoolAddress.getPoolKey(params.token0, params.token1, params.maintenance, params.oracle)
         );
 
-        (
-            uint160 sqrtPriceX96,
-            ,
-            uint128 liquidity,
-            ,
-            ,
-            ,
-            ,
-            bool initialized
-        ) = IMarginalV1Pool(pool).state();
+        (uint160 sqrtPriceX96, , uint128 liquidity, , , , , bool initialized) = IMarginalV1Pool(pool).state();
         if (!initialized) revert PoolNotInitialized();
-        (uint160 oracleSqrtPriceX96, , , , , , ) = IUniswapV3Pool(params.oracle)
-            .slot0();
+        (uint160 oracleSqrtPriceX96, , , , , , ) = IUniswapV3Pool(params.oracle).slot0();
         uint128 oracleLiquidity = IUniswapV3Pool(params.oracle).liquidity();
 
         // for access in callback
@@ -261,23 +193,15 @@ contract PairArbitrageur is
         // first pool and send to second pool for prices to align post arbitrage. Ignores fees and assumes x*y = L^2 for both pools
         if (sqrtPriceX96 == oracleSqrtPriceX96) revert ArbitrageNotAvailable();
         if (
-            (sqrtPriceX96 > oracleSqrtPriceX96 &&
-                params.tokenOut == params.token0) ||
-            (sqrtPriceX96 < oracleSqrtPriceX96 &&
-                params.tokenOut == params.token1)
+            (sqrtPriceX96 > oracleSqrtPriceX96 && params.tokenOut == params.token0) ||
+            (sqrtPriceX96 < oracleSqrtPriceX96 && params.tokenOut == params.token1)
         ) {
             // swap on marginal first then uniswap second
             bool zeroForOne = sqrtPriceX96 > oracleSqrtPriceX96; // zeroForOne on Marginal v1 pool
             uint256 prod = (uint256(liquidity) * uint256(oracleLiquidity)) /
                 (uint256(liquidity) + uint256(oracleLiquidity)); // no overflow since uint128 for liquidity
             int256 amountSpecified = zeroForOne
-                ? -int256(
-                    Math.mulDiv(
-                        prod,
-                        sqrtPriceX96 - oracleSqrtPriceX96,
-                        FixedPoint96.Q96
-                    )
-                )
+                ? -int256(Math.mulDiv(prod, sqrtPriceX96 - oracleSqrtPriceX96, FixedPoint96.Q96))
                 : -int256(
                     (prod << FixedPoint96.RESOLUTION) /
                         sqrtPriceX96 -
@@ -301,11 +225,7 @@ contract PairArbitrageur is
                 zeroForOne,
                 amountSpecified,
                 params.sqrtPriceLimit0X96 == 0
-                    ? (
-                        zeroForOne
-                            ? TickMath.MIN_SQRT_RATIO + 1
-                            : TickMath.MAX_SQRT_RATIO - 1
-                    )
+                    ? (zeroForOne ? TickMath.MIN_SQRT_RATIO + 1 : TickMath.MAX_SQRT_RATIO - 1)
                     : params.sqrtPriceLimit0X96,
                 abi.encode(data)
             );
@@ -315,13 +235,7 @@ contract PairArbitrageur is
             uint256 prod = (uint256(liquidity) * uint256(oracleLiquidity)) /
                 (uint256(liquidity) + uint256(oracleLiquidity)); // no overflow since uint128 for liquidity
             int256 amountSpecified = zeroForOne
-                ? -int256(
-                    Math.mulDiv(
-                        prod,
-                        oracleSqrtPriceX96 - sqrtPriceX96,
-                        FixedPoint96.Q96
-                    )
-                )
+                ? -int256(Math.mulDiv(prod, oracleSqrtPriceX96 - sqrtPriceX96, FixedPoint96.Q96))
                 : -int256(
                     (prod << FixedPoint96.RESOLUTION) /
                         oracleSqrtPriceX96 -
@@ -345,11 +259,7 @@ contract PairArbitrageur is
                 zeroForOne,
                 amountSpecified,
                 params.sqrtPriceLimit0X96 == 0
-                    ? (
-                        zeroForOne
-                            ? TickMath.MIN_SQRT_RATIO + 1
-                            : TickMath.MAX_SQRT_RATIO - 1
-                    )
+                    ? (zeroForOne ? TickMath.MIN_SQRT_RATIO + 1 : TickMath.MAX_SQRT_RATIO - 1)
                     : params.sqrtPriceLimit0X96,
                 abi.encode(data)
             );
@@ -360,8 +270,7 @@ contract PairArbitrageur is
 
         // send profits to recipient
         amountOut = balance(params.tokenOut);
-        if (amountOut < params.amountOutMinimum)
-            revert AmountOutLessThanMin(amountOut);
+        if (amountOut < params.amountOutMinimum) revert AmountOutLessThanMin(amountOut);
 
         if (params.sweepAsETH && params.tokenOut == WETH9) {
             IWETH9(WETH9).withdraw(amountOut);

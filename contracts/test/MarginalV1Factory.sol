@@ -19,8 +19,7 @@ contract MarginalV1Factory is IMarginalV1Factory {
     address public owner;
 
     /// @inheritdoc IMarginalV1Factory
-    mapping(address => mapping(address => mapping(uint24 => mapping(address => address))))
-        public getPool;
+    mapping(address => mapping(address => mapping(uint24 => mapping(address => address)))) public getPool;
     /// @inheritdoc IMarginalV1Factory
     mapping(address => bool) public isPool;
     /// @inheritdoc IMarginalV1Factory
@@ -43,11 +42,7 @@ contract MarginalV1Factory is IMarginalV1Factory {
     error PoolActive();
     error LeverageActive();
 
-    constructor(
-        address _marginalV1Deployer,
-        address _uniswapV3Factory,
-        uint16 _observationCardinalityMinimum
-    ) {
+    constructor(address _marginalV1Deployer, address _uniswapV3Factory, uint16 _observationCardinalityMinimum) {
         owner = msg.sender;
         emit OwnerChanged(address(0), msg.sender);
 
@@ -70,31 +65,18 @@ contract MarginalV1Factory is IMarginalV1Factory {
         uint24 maintenance,
         uint24 uniswapV3Fee
     ) external returns (address pool) {
-        (address token0, address token1) = tokenA < tokenB
-            ? (tokenA, tokenB)
-            : (tokenB, tokenA);
+        (address token0, address token1) = tokenA < tokenB ? (tokenA, tokenB) : (tokenB, tokenA);
         if (getLeverage[maintenance] == 0) revert InvalidMaintenance();
 
-        address oracle = IUniswapV3Factory(uniswapV3Factory).getPool(
-            token0,
-            token1,
-            uniswapV3Fee
-        ); // no need to check tokenA != tokenB or zero address given Uniswap checks if valid
+        address oracle = IUniswapV3Factory(uniswapV3Factory).getPool(token0, token1, uniswapV3Fee); // no need to check tokenA != tokenB or zero address given Uniswap checks if valid
         if (oracle == address(0)) revert InvalidOracle();
-        if (getPool[token0][token1][maintenance][oracle] != address(0))
-            revert PoolActive();
+        if (getPool[token0][token1][maintenance][oracle] != address(0)) revert PoolActive();
 
-        (, , , uint16 observationCardinality, , , ) = IUniswapV3Pool(oracle)
-            .slot0();
+        (, , , uint16 observationCardinality, , , ) = IUniswapV3Pool(oracle).slot0();
         if (observationCardinality < observationCardinalityMinimum)
             revert InvalidObservationCardinality(observationCardinality);
 
-        pool = IMarginalV1PoolDeployer(marginalV1Deployer).deploy(
-            token0,
-            token1,
-            maintenance,
-            oracle
-        );
+        pool = IMarginalV1PoolDeployer(marginalV1Deployer).deploy(token0, token1, maintenance, oracle);
 
         // populate in reverse for key (token0, token1, maintenance, oracle)
         getPool[token0][token1][maintenance][oracle] = pool;

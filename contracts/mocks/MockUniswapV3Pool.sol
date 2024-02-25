@@ -68,9 +68,7 @@ contract MockUniswapV3Pool is Setter {
     );
 
     constructor(address tokenA, address tokenB, uint24 _fee) {
-        (address _token0, address _token1) = tokenA < tokenB
-            ? (tokenA, tokenB)
-            : (tokenB, tokenA);
+        (address _token0, address _token1) = tokenA < tokenB ? (tokenA, tokenB) : (tokenB, tokenA);
         token0 = _token0;
         token1 = _token1;
         fee = _fee;
@@ -83,7 +81,7 @@ contract MockUniswapV3Pool is Setter {
     function setLiquidity(uint128 _liquidity) external {
         liquidity = _liquidity;
     }
-    
+
     function setFeeGrowthGlobalX128(uint256 _feeGrowthGlobal0X128, uint256 _feeGrowthGlobal1X128) external {
         feeGrowthGlobal0X128 = _feeGrowthGlobal0X128;
         feeGrowthGlobal1X128 = _feeGrowthGlobal1X128;
@@ -111,33 +109,20 @@ contract MockUniswapV3Pool is Setter {
     // TODO: fix to be more realistic
     function observe(
         uint32[] calldata secondsAgos
-    )
-        external
-        view
-        returns (
-            int56[] memory tickCumulatives,
-            uint160[] memory secondsPerLiquidityCumulativeX128s
-        )
-    {
+    ) external view returns (int56[] memory tickCumulatives, uint160[] memory secondsPerLiquidityCumulativeX128s) {
         uint256 _observationIndex = observationIndex;
-        require(
-            secondsAgos.length <= _observationIndex,
-            "not enough observations"
-        );
+        require(secondsAgos.length <= _observationIndex, "not enough observations");
         tickCumulatives = new int56[](secondsAgos.length);
         secondsPerLiquidityCumulativeX128s = new uint160[](secondsAgos.length);
         for (uint256 i = 0; i < secondsAgos.length; i++) {
             uint256 j = _observationIndex - secondsAgos.length + i;
             Observation memory observation = observations[j];
             tickCumulatives[i] = observation.tickCumulative;
-            secondsPerLiquidityCumulativeX128s[i] = observation
-                .secondsPerLiquidityCumulativeX128;
+            secondsPerLiquidityCumulativeX128s[i] = observation.secondsPerLiquidityCumulativeX128;
         }
     }
 
-    function increaseObservationCardinalityNext(
-        uint16 observationCardinalityNext
-    ) external {
+    function increaseObservationCardinalityNext(uint16 observationCardinalityNext) external {
         slot0.observationCardinalityNext = observationCardinalityNext;
     }
 
@@ -155,16 +140,13 @@ contract MockUniswapV3Pool is Setter {
         require(amountSpecified != 0, "invalid amount specified");
         require(
             zeroForOne
-                ? (sqrtPriceLimitX96 < _slot0.sqrtPriceX96 &&
-                    sqrtPriceLimitX96 > SqrtPriceMath.MIN_SQRT_RATIO)
-                : (sqrtPriceLimitX96 > _slot0.sqrtPriceX96 &&
-                    sqrtPriceLimitX96 < SqrtPriceMath.MAX_SQRT_RATIO),
+                ? (sqrtPriceLimitX96 < _slot0.sqrtPriceX96 && sqrtPriceLimitX96 > SqrtPriceMath.MIN_SQRT_RATIO)
+                : (sqrtPriceLimitX96 > _slot0.sqrtPriceX96 && sqrtPriceLimitX96 < SqrtPriceMath.MAX_SQRT_RATIO),
             "invalid sqrtPriceLimitX96"
         );
         bool exactInput = amountSpecified > 0;
         int256 amountSpecifiedLessFee = exactInput
-            ? amountSpecified -
-                int256(SwapMath.swapFees(uint256(amountSpecified), fee, false))
+            ? amountSpecified - int256(SwapMath.swapFees(uint256(amountSpecified), fee, false))
             : amountSpecified;
 
         uint160 sqrtPriceX96Next = SqrtPriceMath.sqrtPriceX96NextSwap(
@@ -174,94 +156,62 @@ contract MockUniswapV3Pool is Setter {
             amountSpecifiedLessFee
         );
         require(
-            zeroForOne
-                ? sqrtPriceX96Next >= sqrtPriceLimitX96
-                : sqrtPriceX96Next <= sqrtPriceLimitX96,
+            zeroForOne ? sqrtPriceX96Next >= sqrtPriceLimitX96 : sqrtPriceX96Next <= sqrtPriceLimitX96,
             "sqrtPriceX96 exceeds limit"
         );
 
-        (amount0, amount1) = SwapMath.swapAmounts(
-            _liquidity,
-            _slot0.sqrtPriceX96,
-            sqrtPriceX96Next
-        );
+        (amount0, amount1) = SwapMath.swapAmounts(_liquidity, _slot0.sqrtPriceX96, sqrtPriceX96Next);
         if (!zeroForOne) {
             amount0 = !exactInput ? amountSpecified : amount0;
-            if (amount0 < 0)
-                TransferHelper.safeTransfer(
-                    token0,
-                    recipient,
-                    uint256(-amount0)
-                );
+            if (amount0 < 0) TransferHelper.safeTransfer(token0, recipient, uint256(-amount0));
             uint256 fees1 = exactInput
                 ? uint256(amountSpecified) - uint256(amount1)
                 : SwapMath.swapFees(uint256(amount1), fee, true);
             amount1 += int256(fees1);
 
             uint256 balance1Before = IERC20(token1).balanceOf(address(this));
-            IUniswapV3SwapCallback(msg.sender).uniswapV3SwapCallback(
-                amount0,
-                amount1,
-                data
-            );
+            IUniswapV3SwapCallback(msg.sender).uniswapV3SwapCallback(amount0, amount1, data);
             require(
-                balance1Before + uint256(amount1) <=
-                    IERC20(token1).balanceOf(address(this)),
+                balance1Before + uint256(amount1) <= IERC20(token1).balanceOf(address(this)),
                 "amount1 less than min"
             );
 
-            uint256 delta = _slot0.feeProtocol > 0
-                ? fees1 / _slot0.feeProtocol
-                : 0;
+            uint256 delta = _slot0.feeProtocol > 0 ? fees1 / _slot0.feeProtocol : 0;
             if (delta > 0) protocolFees.token1 += uint128(delta);
 
-            (uint128 liquidityAfter, uint160 sqrtPriceX96After) = LiquidityMath
-                .liquiditySqrtPriceX96Next(
-                    _liquidity,
-                    _slot0.sqrtPriceX96,
-                    amount0,
-                    amount1 - int256(delta)
-                );
+            (uint128 liquidityAfter, uint160 sqrtPriceX96After) = LiquidityMath.liquiditySqrtPriceX96Next(
+                _liquidity,
+                _slot0.sqrtPriceX96,
+                amount0,
+                amount1 - int256(delta)
+            );
             liquidity = liquidityAfter;
             _slot0.sqrtPriceX96 = sqrtPriceX96After;
             _slot0.tick = TickMath.getTickAtSqrtRatio(sqrtPriceX96After);
         } else {
             amount1 = !exactInput ? amountSpecified : amount1;
-            if (amount1 < 0)
-                TransferHelper.safeTransfer(
-                    token1,
-                    recipient,
-                    uint256(-amount1)
-                );
+            if (amount1 < 0) TransferHelper.safeTransfer(token1, recipient, uint256(-amount1));
             uint256 fees0 = exactInput
                 ? uint256(amountSpecified) - uint256(amount0)
                 : SwapMath.swapFees(uint256(amount0), fee, true);
             amount0 += int256(fees0);
 
             uint256 balance0Before = IERC20(token0).balanceOf(address(this));
-            IUniswapV3SwapCallback(msg.sender).uniswapV3SwapCallback(
-                amount0,
-                amount1,
-                data
-            );
+            IUniswapV3SwapCallback(msg.sender).uniswapV3SwapCallback(amount0, amount1, data);
             require(
-                balance0Before + uint256(amount0) <=
-                    IERC20(token0).balanceOf(address(this)),
+                balance0Before + uint256(amount0) <= IERC20(token0).balanceOf(address(this)),
                 "amount0 less than min"
             );
 
-            uint256 delta = _slot0.feeProtocol > 0
-                ? fees0 / _slot0.feeProtocol
-                : 0;
+            uint256 delta = _slot0.feeProtocol > 0 ? fees0 / _slot0.feeProtocol : 0;
             if (delta > 0) protocolFees.token0 += uint128(delta);
 
-            (uint128 liquidityAfter, uint160 sqrtPriceX96After) = LiquidityMath
-                .liquiditySqrtPriceX96Next(
-                    _liquidity,
-                    _slot0.sqrtPriceX96,
-                    amount0 - int256(delta),
-                    amount1
-                );
+            (uint128 liquidityAfter, uint160 sqrtPriceX96After) = LiquidityMath.liquiditySqrtPriceX96Next(
+                _liquidity,
+                _slot0.sqrtPriceX96,
+                amount0 - int256(delta),
+                amount1
+            );
             liquidity = liquidityAfter;
             _slot0.sqrtPriceX96 = sqrtPriceX96After;
             _slot0.tick = TickMath.getTickAtSqrtRatio(sqrtPriceX96After);
@@ -269,14 +219,6 @@ contract MockUniswapV3Pool is Setter {
 
         slot0 = _slot0;
 
-        emit Swap(
-            msg.sender,
-            recipient,
-            amount0,
-            amount1,
-            slot0.sqrtPriceX96,
-            liquidity,
-            slot0.tick
-        );
+        emit Swap(msg.sender, recipient, amount0, amount1, slot0.sqrtPriceX96, liquidity, slot0.tick);
     }
 }

@@ -5,6 +5,7 @@ import pandas as pd
 from typing import ClassVar, List, Mapping, Optional
 
 from ape import chain
+from ape.exceptions import ProviderError
 from backtest_ape.utils import get_block_identifier
 from pydantic import validator
 
@@ -261,15 +262,31 @@ class MarginalV1LPRunner(BaseMarginalV1Runner):
         # build associated observations array
         timestamp = chain.blocks[block_identifier].timestamp
         tick_cumulatives, seconds_per_liquidity_cumulatives = ref_univ3_pool.observe(
-            [seconds_ago, 0], block_identifier=block_identifier
+            [0], block_identifier=block_identifier
         )
+        state["observation1"] = (timestamp, tick_cumulatives[0], seconds_per_liquidity_cumulatives[0], True)
+
+        # try catch to avoid block out of range errors
+        try:
+            tick_cumulatives, seconds_per_liquidity_cumulatives = ref_univ3_pool.observe(
+                [seconds_ago], block_identifier=block_identifier
+            )
+        except ProviderError as err:
+            click.secho(
+                f"Error on getting seconds ago from oracle observations at block {block_identifier}: {err}", blink=True
+            )
+            click.echo(f"Attempting rough approx with observe([0]) at block {block_identifier - seconds_ago // 12}")
+            tick_cumulatives, seconds_per_liquidity_cumulatives = ref_univ3_pool.observe(
+                [0], block_identifier=(block_identifier - seconds_ago // 12)
+            )
+
         state["observation0"] = (
             timestamp - seconds_ago,
             tick_cumulatives[0],
             seconds_per_liquidity_cumulatives[0],
             True,
         )
-        state["observation1"] = (timestamp, tick_cumulatives[1], seconds_per_liquidity_cumulatives[1], True)
+
         return state
 
     def init_mocks_state(self, number: int, state: Mapping):

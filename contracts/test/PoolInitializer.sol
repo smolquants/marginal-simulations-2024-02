@@ -36,13 +36,7 @@ contract PoolInitializer is
 {
     using Path for bytes;
 
-    event PoolInitialize(
-        address indexed sender,
-        address pool,
-        uint256 shares,
-        int256 amount0,
-        int256 amount1
-    );
+    event PoolInitialize(address indexed sender, address pool, uint256 shares, int256 amount0, int256 amount1);
 
     error InvalidOracle();
     error PoolNotInitialized();
@@ -52,10 +46,7 @@ contract PoolInitializer is
     error Amount0BurnedGreaterThanMax(int256 amount0Burned);
     error Amount1BurnedGreaterThanMax(int256 amount1Burned);
 
-    constructor(
-        address _factory,
-        address _WETH9
-    ) PeripheryImmutableState(_factory, _WETH9) {}
+    constructor(address _factory, address _WETH9) PeripheryImmutableState(_factory, _WETH9) {}
 
     struct SwapCallbackData {
         bytes path;
@@ -63,26 +54,11 @@ contract PoolInitializer is
     }
 
     /// @inheritdoc IMarginalV1SwapCallback
-    function marginalV1SwapCallback(
-        int256 amount0Delta,
-        int256 amount1Delta,
-        bytes calldata _data
-    ) external override {
+    function marginalV1SwapCallback(int256 amount0Delta, int256 amount1Delta, bytes calldata _data) external override {
         require(amount0Delta > 0 || amount1Delta > 0); // swaps entirely within 0-liquidity regions are not supported
         SwapCallbackData memory data = abi.decode(_data, (SwapCallbackData));
-        (
-            address tokenIn,
-            address tokenOut,
-            uint24 maintenance,
-            address oracle
-        ) = data.path.decodeFirstPool();
-        CallbackValidation.verifyCallback(
-            factory,
-            tokenIn,
-            tokenOut,
-            maintenance,
-            oracle
-        );
+        (address tokenIn, address tokenOut, uint24 maintenance, address oracle) = data.path.decodeFirstPool();
+        CallbackValidation.verifyCallback(factory, tokenIn, tokenOut, maintenance, oracle);
 
         (bool isExactInput, uint256 amountToPay) = amount0Delta > 0
             ? (tokenIn < tokenOut, uint256(amount0Delta))
@@ -102,19 +78,10 @@ contract PoolInitializer is
         returns (address pool, uint256 shares, int256 amount0, int256 amount1)
     {
         require(params.token0 < params.token1);
-        address oracle = IUniswapV3Factory(uniswapV3Factory).getPool(
-            params.token0,
-            params.token1,
-            params.uniswapV3Fee
-        );
+        address oracle = IUniswapV3Factory(uniswapV3Factory).getPool(params.token0, params.token1, params.uniswapV3Fee);
         if (oracle == address(0)) revert InvalidOracle();
 
-        pool = IMarginalV1Factory(factory).getPool(
-            params.token0,
-            params.token1,
-            params.maintenance,
-            oracle
-        );
+        pool = IMarginalV1Factory(factory).getPool(params.token0, params.token1, params.maintenance, oracle);
         if (pool == address(0)) {
             pool = IMarginalV1Factory(factory).createPool(
                 params.token0,
@@ -127,8 +94,7 @@ contract PoolInitializer is
         // if not initialized, mint min liquidity with dust then swap to given price before adding full amount of liquidity
         (, , , , , , , bool initialized) = IMarginalV1Pool(pool).state();
         if (!initialized) {
-            if (params.liquidityBurned <= PoolConstants.MINIMUM_LIQUIDITY)
-                revert LiquidityBurnedLessThanMin();
+            if (params.liquidityBurned <= PoolConstants.MINIMUM_LIQUIDITY) revert LiquidityBurnedLessThanMin();
             (, uint256 amount0BurnedOnMint, uint256 amount1BurnedOnMint) = mint(
                 MintParams({
                     token0: params.token0,
@@ -142,33 +108,26 @@ contract PoolInitializer is
                 })
             );
 
-            (
-                int256 amount0BurnedOnSwap,
-                int256 amount1BurnedOnSwap
-            ) = initializePoolSqrtPriceX96(
-                    InitializePoolSqrtPriceX96Params({
-                        token0: params.token0,
-                        token1: params.token1,
-                        maintenance: params.maintenance,
-                        oracle: oracle,
-                        recipient: msg.sender,
-                        sqrtPriceX96: params.sqrtPriceX96,
-                        amountInMaximum: type(uint256).max, // impose max on amounts burned (including swap) below
-                        amountOutMinimum: 0, // impose min on amounts in liquidity added in mint call below
-                        sqrtPriceLimitX96: params.sqrtPriceLimitX96,
-                        deadline: params.deadline
-                    })
-                );
+            (int256 amount0BurnedOnSwap, int256 amount1BurnedOnSwap) = initializePoolSqrtPriceX96(
+                InitializePoolSqrtPriceX96Params({
+                    token0: params.token0,
+                    token1: params.token1,
+                    maintenance: params.maintenance,
+                    oracle: oracle,
+                    recipient: msg.sender,
+                    sqrtPriceX96: params.sqrtPriceX96,
+                    amountInMaximum: type(uint256).max, // impose max on amounts burned (including swap) below
+                    amountOutMinimum: 0, // impose min on amounts in liquidity added in mint call below
+                    sqrtPriceLimitX96: params.sqrtPriceLimitX96,
+                    deadline: params.deadline
+                })
+            );
 
             // check haven't burned more than want
-            int256 amount0Burned = int256(amount0BurnedOnMint) +
-                amount0BurnedOnSwap;
-            if (amount0Burned > params.amount0BurnedMax)
-                revert Amount0BurnedGreaterThanMax(amount0Burned);
-            int256 amount1Burned = int256(amount1BurnedOnMint) +
-                amount1BurnedOnSwap;
-            if (amount1Burned > params.amount1BurnedMax)
-                revert Amount1BurnedGreaterThanMax(amount1Burned);
+            int256 amount0Burned = int256(amount0BurnedOnMint) + amount0BurnedOnSwap;
+            if (amount0Burned > params.amount0BurnedMax) revert Amount0BurnedGreaterThanMax(amount0Burned);
+            int256 amount1Burned = int256(amount1BurnedOnMint) + amount1BurnedOnSwap;
+            if (amount1Burned > params.amount1BurnedMax) revert Amount1BurnedGreaterThanMax(amount1Burned);
 
             uint128 liquidityDelta = LiquidityAmounts.getLiquidityForAmounts(
                 params.sqrtPriceX96,
@@ -201,34 +160,15 @@ contract PoolInitializer is
     /// @inheritdoc IPoolInitializer
     function initializePoolSqrtPriceX96(
         InitializePoolSqrtPriceX96Params memory params
-    )
-        public
-        payable
-        override
-        checkDeadline(params.deadline)
-        returns (int256 amount0, int256 amount1)
-    {
+    ) public payable override checkDeadline(params.deadline) returns (int256 amount0, int256 amount1) {
         require(params.token0 < params.token1);
         address pool = PoolAddress.getAddress(
             factory,
-            PoolAddress.getPoolKey(
-                params.token0,
-                params.token1,
-                params.maintenance,
-                params.oracle
-            )
+            PoolAddress.getPoolKey(params.token0, params.token1, params.maintenance, params.oracle)
         );
 
-        (
-            uint160 sqrtPriceX96Existing,
-            ,
-            uint128 liquidityExisting,
-            ,
-            ,
-            ,
-            ,
-            bool initialized
-        ) = IMarginalV1Pool(pool).state();
+        (uint160 sqrtPriceX96Existing, , uint128 liquidityExisting, , , , , bool initialized) = IMarginalV1Pool(pool)
+            .state();
         if (!initialized) revert PoolNotInitialized();
 
         // calculate amount in needed (including fees) to get pool price to sqrtPriceX96 desired
@@ -241,15 +181,10 @@ contract PoolInitializer is
         bool zeroForOne = params.sqrtPriceX96 < sqrtPriceX96Existing;
         int256 amountSpecified = zeroForOne ? amount0Delta : amount1Delta;
         require(amountSpecified > 0);
-        amountSpecified += int256(
-            SwapMath.swapFees(uint256(amountSpecified), PoolConstants.fee, true)
-        );
+        amountSpecified += int256(SwapMath.swapFees(uint256(amountSpecified), PoolConstants.fee, true));
 
-        uint256 amountInMaximum = params.amountInMaximum == 0
-            ? type(uint256).max
-            : params.amountInMaximum;
-        if (uint256(amountSpecified) > amountInMaximum)
-            revert AmountInGreaterThanMax(uint256(amountSpecified));
+        uint256 amountInMaximum = params.amountInMaximum == 0 ? type(uint256).max : params.amountInMaximum;
+        if (uint256(amountSpecified) > amountInMaximum) revert AmountInGreaterThanMax(uint256(amountSpecified));
 
         SwapCallbackData memory data = SwapCallbackData({
             path: abi.encodePacked(
@@ -266,55 +201,29 @@ contract PoolInitializer is
             zeroForOne,
             amountSpecified,
             params.sqrtPriceLimitX96 == 0
-                ? (
-                    zeroForOne
-                        ? TickMath.MIN_SQRT_RATIO + 1
-                        : TickMath.MAX_SQRT_RATIO - 1
-                )
+                ? (zeroForOne ? TickMath.MIN_SQRT_RATIO + 1 : TickMath.MAX_SQRT_RATIO - 1)
                 : params.sqrtPriceLimitX96,
             abi.encode(data)
         );
         uint256 amountOut = uint256(-(zeroForOne ? amount1 : amount0));
-        if (amountOut < params.amountOutMinimum)
-            revert AmountOutLessThanMin(amountOut);
+        if (amountOut < params.amountOutMinimum) revert AmountOutLessThanMin(amountOut);
     }
 
     /// @inheritdoc IPoolInitializer
-    function initializeOracleIfNecessary(
-        InitializeOracleParams calldata params
-    ) external override {
+    function initializeOracleIfNecessary(InitializeOracleParams calldata params) external override {
         require(params.token0 < params.token1);
-        address oracle = IUniswapV3Factory(uniswapV3Factory).getPool(
-            params.token0,
-            params.token1,
-            params.uniswapV3Fee
-        );
+        address oracle = IUniswapV3Factory(uniswapV3Factory).getPool(params.token0, params.token1, params.uniswapV3Fee);
         if (oracle == address(0)) revert InvalidOracle();
 
-        (
-            ,
-            ,
-            ,
-            ,
-            uint16 observationCardinalityNextExisting,
-            ,
-
-        ) = IUniswapV3Pool(oracle).slot0();
-        uint16 observationCardinalityMinimum = IMarginalV1Factory(factory)
-            .observationCardinalityMinimum();
+        (, , , , uint16 observationCardinalityNextExisting, , ) = IUniswapV3Pool(oracle).slot0();
+        uint16 observationCardinalityMinimum = IMarginalV1Factory(factory).observationCardinalityMinimum();
         require(
-            observationCardinalityNextExisting <
-                params.observationCardinalityNext &&
-                observationCardinalityMinimum <=
-                params.observationCardinalityNext
+            observationCardinalityNextExisting < params.observationCardinalityNext &&
+                observationCardinalityMinimum <= params.observationCardinalityNext
         );
 
-        if (
-            observationCardinalityNextExisting < observationCardinalityMinimum
-        ) {
-            IUniswapV3Pool(oracle).increaseObservationCardinalityNext(
-                params.observationCardinalityNext
-            );
+        if (observationCardinalityNextExisting < observationCardinalityMinimum) {
+            IUniswapV3Pool(oracle).increaseObservationCardinalityNext(params.observationCardinalityNext);
         }
     }
 }

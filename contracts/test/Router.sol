@@ -49,10 +49,7 @@ contract Router is
     /// @dev Transient storage variable used for returning the computed amount in for an exact output swap.
     uint256 private amountInCached = DEFAULT_AMOUNT_IN_CACHED;
 
-    constructor(
-        address _factory,
-        address _WETH9
-    ) PeripheryImmutableState(_factory, _WETH9) {}
+    constructor(address _factory, address _WETH9) PeripheryImmutableState(_factory, _WETH9) {}
 
     /// @dev Returns the pool for the given token pair, maintenance, and oracle. The pool contract may or may not exist.
     function getPool(
@@ -63,10 +60,7 @@ contract Router is
     ) private view returns (IMarginalV1Pool) {
         return
             IMarginalV1Pool(
-                PoolAddress.getAddress(
-                    factory,
-                    PoolAddress.getPoolKey(tokenA, tokenB, maintenance, oracle)
-                )
+                PoolAddress.getAddress(factory, PoolAddress.getPoolKey(tokenA, tokenB, maintenance, oracle))
             );
     }
 
@@ -76,26 +70,11 @@ contract Router is
     }
 
     /// @inheritdoc IMarginalV1SwapCallback
-    function marginalV1SwapCallback(
-        int256 amount0Delta,
-        int256 amount1Delta,
-        bytes calldata _data
-    ) external override {
+    function marginalV1SwapCallback(int256 amount0Delta, int256 amount1Delta, bytes calldata _data) external override {
         require(amount0Delta > 0 || amount1Delta > 0); // swaps entirely within 0-liquidity regions are not supported
         SwapCallbackData memory data = abi.decode(_data, (SwapCallbackData));
-        (
-            address tokenIn,
-            address tokenOut,
-            uint24 maintenance,
-            address oracle
-        ) = data.path.decodeFirstPool();
-        CallbackValidation.verifyCallback(
-            factory,
-            tokenIn,
-            tokenOut,
-            maintenance,
-            oracle
-        );
+        (address tokenIn, address tokenOut, uint24 maintenance, address oracle) = data.path.decodeFirstPool();
+        CallbackValidation.verifyCallback(factory, tokenIn, tokenOut, maintenance, oracle);
 
         (bool isExactInput, uint256 amountToPay) = amount0Delta > 0
             ? (tokenIn < tokenOut, uint256(amount0Delta))
@@ -125,33 +104,19 @@ contract Router is
         // allow swapping to the router address with address 0
         if (recipient == address(0)) recipient = address(this);
 
-        (
-            address tokenIn,
-            address tokenOut,
-            uint24 maintenance,
-            address oracle
-        ) = data.path.decodeFirstPool();
+        (address tokenIn, address tokenOut, uint24 maintenance, address oracle) = data.path.decodeFirstPool();
 
         bool zeroForOne = tokenIn < tokenOut;
 
-        (int256 amount0, int256 amount1) = getPool(
-            tokenIn,
-            tokenOut,
-            maintenance,
-            oracle
-        ).swap(
-                recipient,
-                zeroForOne,
-                amountIn.toInt256(),
-                sqrtPriceLimitX96 == 0
-                    ? (
-                        zeroForOne
-                            ? TickMath.MIN_SQRT_RATIO + 1
-                            : TickMath.MAX_SQRT_RATIO - 1
-                    )
-                    : sqrtPriceLimitX96,
-                abi.encode(data)
-            );
+        (int256 amount0, int256 amount1) = getPool(tokenIn, tokenOut, maintenance, oracle).swap(
+            recipient,
+            zeroForOne,
+            amountIn.toInt256(),
+            sqrtPriceLimitX96 == 0
+                ? (zeroForOne ? TickMath.MIN_SQRT_RATIO + 1 : TickMath.MAX_SQRT_RATIO - 1)
+                : sqrtPriceLimitX96,
+            abi.encode(data)
+        );
 
         return uint256(-(zeroForOne ? amount1 : amount0));
     }
@@ -159,24 +124,13 @@ contract Router is
     /// @inheritdoc IRouter
     function exactInputSingle(
         ExactInputSingleParams calldata params
-    )
-        external
-        payable
-        override
-        checkDeadline(params.deadline)
-        returns (uint256 amountOut)
-    {
+    ) external payable override checkDeadline(params.deadline) returns (uint256 amountOut) {
         amountOut = exactInputInternal(
             params.amountIn,
             params.recipient,
             params.sqrtPriceLimitX96,
             SwapCallbackData({
-                path: abi.encodePacked(
-                    params.tokenIn,
-                    params.maintenance,
-                    params.oracle,
-                    params.tokenOut
-                ),
+                path: abi.encodePacked(params.tokenIn, params.maintenance, params.oracle, params.tokenOut),
                 payer: msg.sender
             })
         );
@@ -186,13 +140,7 @@ contract Router is
     /// @inheritdoc IRouter
     function exactInput(
         ExactInputParams memory params
-    )
-        external
-        payable
-        override
-        checkDeadline(params.deadline)
-        returns (uint256 amountOut)
-    {
+    ) external payable override checkDeadline(params.deadline) returns (uint256 amountOut) {
         address payer = msg.sender; // msg.sender pays for the first hop
 
         while (true) {
@@ -232,33 +180,19 @@ contract Router is
         // allow swapping to the router address with address 0
         if (recipient == address(0)) recipient = address(this);
 
-        (
-            address tokenOut,
-            address tokenIn,
-            uint24 maintenance,
-            address oracle
-        ) = data.path.decodeFirstPool();
+        (address tokenOut, address tokenIn, uint24 maintenance, address oracle) = data.path.decodeFirstPool();
 
         bool zeroForOne = tokenIn < tokenOut;
 
-        (int256 amount0Delta, int256 amount1Delta) = getPool(
-            tokenIn,
-            tokenOut,
-            maintenance,
-            oracle
-        ).swap(
-                recipient,
-                zeroForOne,
-                -amountOut.toInt256(),
-                sqrtPriceLimitX96 == 0
-                    ? (
-                        zeroForOne
-                            ? TickMath.MIN_SQRT_RATIO + 1
-                            : TickMath.MAX_SQRT_RATIO - 1
-                    )
-                    : sqrtPriceLimitX96,
-                abi.encode(data)
-            );
+        (int256 amount0Delta, int256 amount1Delta) = getPool(tokenIn, tokenOut, maintenance, oracle).swap(
+            recipient,
+            zeroForOne,
+            -amountOut.toInt256(),
+            sqrtPriceLimitX96 == 0
+                ? (zeroForOne ? TickMath.MIN_SQRT_RATIO + 1 : TickMath.MAX_SQRT_RATIO - 1)
+                : sqrtPriceLimitX96,
+            abi.encode(data)
+        );
 
         uint256 amountOutReceived;
         (amountIn, amountOutReceived) = zeroForOne
@@ -276,25 +210,14 @@ contract Router is
     /// @inheritdoc IRouter
     function exactOutputSingle(
         ExactOutputSingleParams calldata params
-    )
-        external
-        payable
-        override
-        checkDeadline(params.deadline)
-        returns (uint256 amountIn)
-    {
+    ) external payable override checkDeadline(params.deadline) returns (uint256 amountIn) {
         // avoid an SLOAD by using the swap return data
         amountIn = exactOutputInternal(
             params.amountOut,
             params.recipient,
             params.sqrtPriceLimitX96,
             SwapCallbackData({
-                path: abi.encodePacked(
-                    params.tokenOut,
-                    params.maintenance,
-                    params.oracle,
-                    params.tokenIn
-                ),
+                path: abi.encodePacked(params.tokenOut, params.maintenance, params.oracle, params.tokenIn),
                 payer: msg.sender
             })
         );
@@ -307,13 +230,7 @@ contract Router is
     /// @inheritdoc IRouter
     function exactOutput(
         ExactOutputParams calldata params
-    )
-        external
-        payable
-        override
-        checkDeadline(params.deadline)
-        returns (uint256 amountIn)
-    {
+    ) external payable override checkDeadline(params.deadline) returns (uint256 amountIn) {
         // it's okay that the payer is fixed to msg.sender here, as they're only paying for the "final" exact output
         // swap, which happens first, and subsequent swaps are paid for within nested callback frames
         exactOutputInternal(
@@ -331,12 +248,7 @@ contract Router is
     /// @inheritdoc IRouter
     function addLiquidity(
         AddLiquidityParams calldata params
-    )
-        external
-        payable
-        checkDeadline(params.deadline)
-        returns (uint256 shares, uint256 amount0, uint256 amount1)
-    {
+    ) external payable checkDeadline(params.deadline) returns (uint256 shares, uint256 amount0, uint256 amount1) {
         (uint160 sqrtPriceX96, , , , , , , bool initialized) = getPool(
             params.token0,
             params.token1,

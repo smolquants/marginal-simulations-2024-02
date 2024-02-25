@@ -13,11 +13,13 @@ contract MarginalV1PoolDeployer is IMarginalV1PoolDeployer {
         address oracle
     ) external returns (address pool) {
         pool = address(
-            new MarginalV1Pool{
-                salt: keccak256(
-                    abi.encode(msg.sender, token0, token1, maintenance, oracle)
-                )
-            }(msg.sender, token0, token1, maintenance, oracle)
+            new MarginalV1Pool{salt: keccak256(abi.encode(msg.sender, token0, token1, maintenance, oracle))}(
+                msg.sender,
+                token0,
+                token1,
+                maintenance,
+                oracle
+            )
         );
     }
 }
