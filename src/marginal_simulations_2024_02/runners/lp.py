@@ -28,8 +28,18 @@ class MarginalV1LPRunner(BaseMarginalV1Runner):
 
     _backtester_name: ClassVar[str] = "MarginalV1LPBacktest"
 
+    # indices: [zeroForOne = True, zeroForOne = False]
     _token_ids: List[int] = [-1, -1]  # token IDs for outstanding positions on mrglv1 pool (only two of them)
-    _blocks_settle: int = [-1, -1]  # future blocks to settle positions at
+    _blocks_settle: List[int] = [-1, -1]  # future blocks to settle positions at
+
+    _sizes_outstanding: List[int] = [0, 0]
+    _margins_outstanding: List[int] = [0, 0]
+    _debts_outstanding: List[int] = [0, 0]  # with funding
+    _debts_without_funding_outstanding: List[int] = [0, 0]
+
+    _amounts0_locked: List[int] = [0, 0]
+    _amounts1_locked: List[int] = [0, 0]
+
     _positions_liquidated_cumulative: List[int] = [0, 0]
     _positions_settled_cumulative: List[int] = [0, 0]
     _sizes_liquidated_cumulative: List[int] = [0, 0]
@@ -39,7 +49,10 @@ class MarginalV1LPRunner(BaseMarginalV1Runner):
         0,
     ]  # (state_after.liquidity - state_before.liquidity) - position.liquidityLocked
     _net_liquidity_settled_cumulative: List[int] = [0, 0]
+
+    # indices: [token0, token1]
     _last_univ3_fee_growth_global_x128: List[int] = [-1, -1]
+    _balances_pool: List[int] = [0, 0]
 
     @validator("leverage")
     def leverage_greater_than_one(cls, v, **kwargs):
@@ -87,6 +100,60 @@ class MarginalV1LPRunner(BaseMarginalV1Runner):
         liquidity_delta_01 = int((total_liquidity * self.utilization * (1 + self.skew)) // 2)
         liquidity_delta_10 = int((total_liquidity * self.utilization * (1 - self.skew)) // 2)
         return (liquidity_delta_01, liquidity_delta_10)
+
+    def get_positions_values(self) -> (List[int], List[int], List[int], List[int]):
+        """
+        Gets the sizes, debts (with and without funding) and margins of the oustanding positions.
+
+        Returns:
+            sizes_outstanding (List[int]): Position sizes for [zeroForOne=true, zeroForOne=false]o
+            margins_outstanding (List[int]): Position margins for [zeroForOne=true, zeroForOne=false]
+            debts_outstanding (List[int]): Position debts for [zeroForOne=true, zeroForOne=false]
+            debts_without_funding_outstanding (List[int]): Position debts without funding (originally at open) for [zeroForOne=true, zeroForOne=false]
+        """
+        mock_mrglv1_manager = self._mocks["mrglv1_manager"]
+        mock_mrglv1_pool = self._mocks["mrglv1_pool"]
+
+        sizes_outstanding = [0, 0]
+        margins_outstanding = [0, 0]
+        debts_outstanding = [0, 0]
+        debts_without_funding_outstanding = [0, 0]
+        for i, token_id in enumerate(self._token_ids):
+            position = mock_mrglv1_manager.positions(token_id)
+            key = get_mrglv1_position_key(mock_mrglv1_manager.address, position.positionId)
+            pposition = mock_mrglv1_pool.positions(key)
+            sizes_outstanding[i] = position.size
+            margins_outstanding[i] = position.margin
+            debts_outstanding[i] = position.debt
+            debts_without_funding_outstanding[i] = pposition.debt0 if position.zeroForOne else pposition.debt1
+
+        return (sizes_outstanding, margins_outstanding, debts_outstanding, debts_without_funding_outstanding)
+
+    def get_positions_amounts_locked(self) -> (List[int], List[int]):
+        """
+        Gets the amounts of token0 and token1 locked in outstanding positions.
+
+        Returns:
+            amounts0_locked (List[int]): Amounts of token0 locked for [zeroForOne=true, zeroForOne=false]
+            amount1_locked (List[int]): Amounts of token1 locked for [zeroForOne=true, zeroForOne=false]
+        """
+        mock_mrglv1_manager = self._mocks["mrglv1_manager"]
+        mock_mrglv1_pool = self._mocks["mrglv1_pool"]
+
+        amounts0_locked = [0, 0]
+        amounts1_locked = [0, 0]
+        for i, token_id in enumerate(self._token_ids):
+            position = mock_mrglv1_manager.positions(token_id)
+            key = get_mrglv1_position_key(mock_mrglv1_manager.address, position.positionId)
+            pposition = mock_mrglv1_pool.positions(key)
+            if not pposition.zeroForOne:
+                amounts0_locked[i] = pposition.size + pposition.margin + pposition.debt0 + pposition.insurance0
+                amounts1_locked[i] = pposition.insurance1
+            else:
+                amounts0_locked[i] = pposition.insurance0
+                amounts1_locked[i] = pposition.size + pposition.margin + pposition.debt1 + pposition.insurance1
+
+        return (amounts0_locked, amounts1_locked)
 
     def arb_pools(self):
         """
@@ -543,6 +610,18 @@ class MarginalV1LPRunner(BaseMarginalV1Runner):
         # arb pools again given potential positions opened if arb there
         self.arb_pools()
 
+        # track outstanding position attributes
+        (
+            self._sizes_outstanding,
+            self._margins_outstanding,
+            self._debts_outstanding,
+            self._debts_without_funding_outstanding,
+        ) = self.get_positions_values()
+        self._amounts0_locked, self._amounts1_locked = self.get_positions_amounts_locked()
+
+        # track mock token balances in pool
+        self._balances_pool = [mock_token.balanceOf(mock_mrglv1_pool.address) for mock_token in mock_tokens]
+
     def record(self, path: str, number: int, state: Mapping, values: List[int]):
         """
         Records the value and possibly some state at the given block.
@@ -571,12 +650,20 @@ class MarginalV1LPRunner(BaseMarginalV1Runner):
         # all lists so unfold
         attr_names = [
             "_token_ids",
+            "_blocks_settle",
+            "_sizes_outstanding",
+            "_margins_outstanding",
+            "_debts_outstanding",
+            "_debts_without_funding_outstanding",
+            "_amounts0_locked",
+            "_amounts1_locked",
             "_positions_liquidated_cumulative",
             "_positions_settled_cumulative",
             "_sizes_liquidated_cumulative",
             "_sizes_settled_cumulative",
             "_net_liquidity_liquidated_cumulative",
             "_net_liquidity_settled_cumulative",
+            "_balances_pool",
         ]
         for name in attr_names:
             cum_list = getattr(self, name)
