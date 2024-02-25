@@ -114,6 +114,22 @@ def deploy_mock_mrglv1_manager(
     return project.NonfungiblePositionManager.deploy(factory.address, WETH9.address, sender=acc)
 
 
+def deploy_mock_mrglv1_quoter(
+    factory: ContractInstance,
+    WETH9: ContractInstance,
+    manager: ContractInstance,
+    univ3_quoter: ContractInstance,
+    acc: AccountAPI,
+) -> ContractInstance:
+    """
+    Deploys the mock Marginal V1 quoter.
+
+    Returns:
+        :class:`ape.contracts.ContractInstance`
+    """
+    return project.Quoter.deploy(factory.address, WETH9.address, manager.address, univ3_quoter.address, sender=acc)
+
+
 def deploy_mock_mrglv1_arbitrageur(
     factory: ContractInstance,
     WETH9: ContractInstance,

@@ -101,7 +101,7 @@ def get_mrglv1_size_from_liquidity_delta(
     )
     size = (
         (debt1 * (1 << 192)) // (sqrt_price_x96_next * sqrt_price_x96)
-        if zero_for_one
+        if not zero_for_one
         else (debt0 * (sqrt_price_x96_next * sqrt_price_x96)) // (1 << 192)
     )
     return size

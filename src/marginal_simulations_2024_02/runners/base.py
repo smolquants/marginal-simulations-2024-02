@@ -14,6 +14,7 @@ from marginal_simulations_2024_02.runners.setup import (
     deploy_mock_mrglv1_initializer,
     deploy_mock_mrglv1_router,
     deploy_mock_mrglv1_manager,
+    deploy_mock_mrglv1_quoter,
     deploy_mock_mrglv1_arbitrageur,
 )
 
@@ -21,7 +22,7 @@ from marginal_simulations_2024_02.runners.setup import (
 class BaseMarginalV1Runner(BaseRunner):
     maintenance: int = 250000  # min maintenance of the Marginal pool used in backtests
 
-    _ref_keys: ClassVar[List[str]] = ["WETH9", "univ3_pool"]
+    _ref_keys: ClassVar[List[str]] = ["WETH9", "univ3_pool", "univ3_static_quoter"]
 
     def __init__(self, **data: Any):
         """
@@ -74,9 +75,14 @@ class BaseMarginalV1Runner(BaseRunner):
 
         # deploy mrglv1 periphery contracts to interact with mocks
         ref_WETH9 = self._refs["WETH9"]
+        ref_univ3_quoter = self._refs["univ3_static_quoter"]
+
         mock_initializer = deploy_mock_mrglv1_initializer(mock_mrglv1_factory, ref_WETH9, self.acc)
         mock_router = deploy_mock_mrglv1_router(mock_mrglv1_factory, ref_WETH9, self.acc)
         mock_manager = deploy_mock_mrglv1_manager(mock_mrglv1_factory, ref_WETH9, self.acc)
+        mock_quoter = deploy_mock_mrglv1_quoter(
+            mock_mrglv1_factory, ref_WETH9, mock_manager, ref_univ3_quoter, self.acc
+        )
         mock_arbitrageur = deploy_mock_mrglv1_arbitrageur(mock_mrglv1_factory, ref_WETH9, self.acc)
 
         self._mocks = {
@@ -88,5 +94,6 @@ class BaseMarginalV1Runner(BaseRunner):
             "mrglv1_initializer": mock_initializer,
             "mrglv1_router": mock_router,
             "mrglv1_manager": mock_manager,
+            "mrglv1_quoter": mock_quoter,
             "mrglv1_arbitrageur": mock_arbitrageur,
         }

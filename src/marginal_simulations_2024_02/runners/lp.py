@@ -20,7 +20,7 @@ from marginal_simulations_2024_02.utils import (
 class MarginalV1LPRunner(BaseMarginalV1Runner):
     liquidity: int = 0  # initial liquidity deployed by runner
     utilization: float = 0  # = pool.liquidityLocked / pool.totalLiquidity
-    skew: float = 0  # [-1, 1]: -1 is all utilization short, +1 is all long
+    skew: float = 0  # [-1, 1]: -1 is all utilization long, +1 is all short
     leverage: float = 1.1  # average leverage of positions on pool
     blocks_held: int = 7200  # average number of blocks positions held
     sqrt_price_tol: float = 0.0025  # sqrt price diff above which should arb pools
@@ -83,8 +83,8 @@ class MarginalV1LPRunner(BaseMarginalV1Runner):
         liquidity_locked = mock_mrglv1_pool.liquidityLocked()
         total_liquidity = liquidity + liquidity_locked
 
-        liquidity_delta_01 = (total_liquidity * self.utilization * (1 + self.skew)) // 2
-        liquidity_delta_10 = (total_liquidity * self.utilization * (1 - self.skew)) // 2
+        liquidity_delta_01 = int((total_liquidity * self.utilization * (1 + self.skew)) // 2)
+        liquidity_delta_10 = int((total_liquidity * self.utilization * (1 - self.skew)) // 2)
         return (liquidity_delta_01, liquidity_delta_10)
 
     def arb_pools(self):
@@ -396,6 +396,7 @@ class MarginalV1LPRunner(BaseMarginalV1Runner):
         mock_tokens = self._mocks["tokens"]
         mock_univ3_pool = self._mocks["univ3_pool"]
         mock_mrglv1_manager = self._mocks["mrglv1_manager"]
+        mock_mrglv1_quoter = self._mocks["mrglv1_quoter"]
         mock_mrglv1_pool = self._mocks["mrglv1_pool"]
 
         # simulate swaps for fee volume on mrgl v1
@@ -484,10 +485,14 @@ class MarginalV1LPRunner(BaseMarginalV1Runner):
                 zero_for_one,
                 self.maintenance,
             )
-            margin = size_desired / (self.leverage - 1)
+            margin = int(size_desired / (self.leverage - 1))
+            click.echo(f"New position liquidity delta: {liquidity_delta}")
+            click.echo(f"New position zeroForOne: {zero_for_one}")
+            click.echo(f"New position sizeDesired: {size_desired}")
+            click.echo(f"New position margin: {margin}")
             mint_params = (
-                mock_tokens[0],
-                mock_tokens[1],
+                mock_tokens[0].address,
+                mock_tokens[1].address,
                 self.maintenance,
                 mock_univ3_pool.address,
                 zero_for_one,
@@ -500,6 +505,8 @@ class MarginalV1LPRunner(BaseMarginalV1Runner):
                 self.acc.address,
                 2**256 - 1,
             )
+            quote = mock_mrglv1_quoter.quoteMint(mint_params)
+            click.echo(f"Quote for opening new position: {quote}")
             receipt = mock_mrglv1_manager.mint(mint_params, sender=self.acc, value=int(1e18))  # excess ETH in case
             next_token_id = receipt.decode_logs(mock_mrglv1_manager.Mint)[0].tokenId
             next_position = mock_mrglv1_manager.positions(next_token_id)

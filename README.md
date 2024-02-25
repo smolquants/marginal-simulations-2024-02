@@ -49,7 +49,7 @@ Then run the backtest script with e.g. the `MarginalV1LPRunner`
 INFO: Starting 'anvil' process.
 You are connected to provider network ethereum:mainnet-fork:foundry.
 Runner type (MarginalV1LPRunner): MarginalV1LPRunner
-Runner kwarg (ref_addrs) [{}]: {"WETH9": "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2", "univ3_pool": "0x88e6A0c2dDD26FEEb64F039a2c41296FcB3f5640"}
+Runner kwarg (ref_addrs) [{}]: {"WETH9": "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2", "univ3_pool": "0x88e6A0c2dDD26FEEb64F039a2c41296FcB3f5640", "univ3_static_quoter": "0xc80f61d1bdAbD8f5285117e1558fDDf8C64870FE"}
 Runner kwarg (acc_addr) defaults to None. Do you want to input a value? [y/N]: N
 Runner kwarg (maintenance) [250000]:
 Runner kwarg (liquidity) [0]: 91287092917527680
