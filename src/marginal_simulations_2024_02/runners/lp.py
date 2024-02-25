@@ -102,9 +102,9 @@ class MarginalV1LPRunner(BaseMarginalV1Runner):
         mrglv1_sqrt_price_x96 = mock_mrglv1_pool.state().sqrtPriceX96
         rel_sqrt_price_diff = univ3_sqrt_price_x96 / mrglv1_sqrt_price_x96 - 1
 
-        click.echo(f"Uniswap v3 sqrt price X96: {univ3_sqrt_price_x96}")
-        click.echo(f"Marginal v1 sqrt price X96: {mrglv1_sqrt_price_x96}")
-        click.echo(f"Relative difference in sqrt price X96 values: {rel_sqrt_price_diff}")
+        click.echo(f"Uniswap v3 sqrt price X96 before arbitrage: {univ3_sqrt_price_x96}")
+        click.echo(f"Marginal v1 sqrt price X96 before arbitrage: {mrglv1_sqrt_price_x96}")
+        click.echo(f"Relative difference in sqrt price X96 values before arbitrage: {rel_sqrt_price_diff}")
 
         if abs(rel_sqrt_price_diff) <= self.sqrt_price_tol:
             return
@@ -126,6 +126,14 @@ class MarginalV1LPRunner(BaseMarginalV1Runner):
         )
         click.echo("Arbitraging Marginal v1 and Uniswap v3 pools ...")
         mock_mrglv1_arbitrageur.execute(execute_params, sender=self.acc)
+
+        univ3_sqrt_price_x96 = mock_univ3_pool.slot0().sqrtPriceX96
+        mrglv1_sqrt_price_x96 = mock_mrglv1_pool.state().sqrtPriceX96
+        rel_sqrt_price_diff = univ3_sqrt_price_x96 / mrglv1_sqrt_price_x96 - 1
+
+        click.echo(f"Uniswap v3 sqrt price X96 after arbitrage: {univ3_sqrt_price_x96}")
+        click.echo(f"Marginal v1 sqrt price X96 after arbitrage: {mrglv1_sqrt_price_x96}")
+        click.echo(f"Relative difference in sqrt price X96 values after arbitrage: {rel_sqrt_price_diff}")
 
     def simulate_swaps(self, state: Mapping):
         """

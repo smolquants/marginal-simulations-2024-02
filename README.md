@@ -53,13 +53,15 @@ Runner kwarg (ref_addrs) [{}]: {"WETH9": "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C75
 Runner kwarg (acc_addr) defaults to None. Do you want to input a value? [y/N]: N
 Runner kwarg (maintenance) [250000]:
 Runner kwarg (liquidity) [0]: 91287092917527680
-Runner kwarg (utilization) [0]: 0.1
-Runner kwarg (skew) [0]: -0.25
+Runner kwarg (utilization) [0]: 0.25
+Runner kwarg (skew) [0]: -0.5
 Runner kwarg (leverage) [1.1]: 3
 Runner kwarg (blocks_held) [7200]: 50400
 Runner kwarg (sqrt_price_tol) [0.0025]:
-Start block number: 16219692
-Stop block number [-1]: 16867692
+Runner instance: ref_addrs={'WETH9': '0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2', 'univ3_pool': '0x88e6A0c2dDD26FEEb64F039a2c41296FcB3f5640', 'univ3_static_quoter': '0xc80f61d1bdAbD8f5285117e1558fDDf8C64870FE'} acc_addr=None maintenance=250000 liquidity=91287092917527680 utilization=0.25 skew=-0.5 leverage=3.0 blocks_held=50400 sqrt_price_tol=0.0025
+Start block number: 17998181
+Stop block number [-1]: 19294181
 Step size [1]: 2400
 Setting up runner ...
+Deploying mock ERC20 tokens ...
 ```
