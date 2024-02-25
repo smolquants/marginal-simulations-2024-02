@@ -546,8 +546,8 @@ class MarginalV1LPRunner(BaseMarginalV1Runner):
                 "univ3_liquidity": state["liquidity"],
                 "univ3_feeGrowthGlobal0X128": state["fee_growth_global0_x128"],
                 "univ3_feeGrowthGlobal1X128": state["fee_growth_global1_x128"],
-                "univ3_observation0": state["observation0"],
-                "univ3_observation1": state["observation1"],
+                "univ3_observation0_tick_cumulatives": state["observation0"][1],
+                "univ3_observation1_tick_cumulatives": state["observation1"][1],
             }
         )
 
