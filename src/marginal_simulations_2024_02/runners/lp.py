@@ -13,6 +13,7 @@ from marginal_simulations_2024_02.runners.base import BaseMarginalV1Runner
 from marginal_simulations_2024_02.constants import FEE_UNIT, MINIMUM_LIQUIDITY
 from marginal_simulations_2024_02.utils import (
     get_mrglv1_amounts_for_liquidity,
+    get_mrglv1_liquidity_sqrt_price_x96_from_reserves,
     get_mrglv1_size_from_liquidity_delta,
     get_mrglv1_position_key,
 )
@@ -56,9 +57,11 @@ class MarginalV1LPRunner(BaseMarginalV1Runner):
     _last_univ3_observation1: Tuple = (-1, -1, -1, -1)
     _balances_pool: List[int] = [0, 0]
 
-    # mrgl v1 mock pool oracle state
+    # mrgl v1 mock pool state
     _last_mrglv1_block_timestamp: int = -1
     _last_mrglv1_tick_cumulative: int = -1
+    _net_liquidity_swap_fees_cumulative: int = 0  # liquidity gained due to fees on swaps
+    _net_liquidity_position_fees_cumulative: int = 0  # liquidity gained due to fees on leverage positions
 
     @validator("leverage")
     def leverage_greater_than_one(cls, v, **kwargs):
@@ -182,7 +185,8 @@ class MarginalV1LPRunner(BaseMarginalV1Runner):
         ref_WETH9 = self._refs["WETH9"]
 
         univ3_sqrt_price_x96 = mock_univ3_pool.slot0().sqrtPriceX96
-        mrglv1_sqrt_price_x96 = mock_mrglv1_pool.state().sqrtPriceX96
+        mrglv1_state_before = mock_mrglv1_pool.state()
+        mrglv1_sqrt_price_x96 = mrglv1_state_before.sqrtPriceX96
         rel_sqrt_price_diff = univ3_sqrt_price_x96 / mrglv1_sqrt_price_x96 - 1
 
         click.echo(f"Uniswap v3 sqrt price X96 before arbitrage: {univ3_sqrt_price_x96}")
@@ -211,12 +215,17 @@ class MarginalV1LPRunner(BaseMarginalV1Runner):
         mock_mrglv1_arbitrageur.execute(execute_params, sender=self.acc)
 
         univ3_sqrt_price_x96 = mock_univ3_pool.slot0().sqrtPriceX96
-        mrglv1_sqrt_price_x96 = mock_mrglv1_pool.state().sqrtPriceX96
+        mrglv1_state_after = mock_mrglv1_pool.state()
+        mrglv1_sqrt_price_x96 = mrglv1_state_after.sqrtPriceX96
         rel_sqrt_price_diff = univ3_sqrt_price_x96 / mrglv1_sqrt_price_x96 - 1
 
         click.echo(f"Uniswap v3 sqrt price X96 after arbitrage: {univ3_sqrt_price_x96}")
         click.echo(f"Marginal v1 sqrt price X96 after arbitrage: {mrglv1_sqrt_price_x96}")
         click.echo(f"Relative difference in sqrt price X96 values after arbitrage: {rel_sqrt_price_diff}")
+
+        liquidity_delta_fees = mrglv1_state_after.liquidity - mrglv1_state_before.liquidity
+        click.echo(f"Liquidity gained from arbitrage fee volume: {liquidity_delta_fees}")
+        self._net_liquidity_swap_fees_cumulative += liquidity_delta_fees
 
     def simulate_swaps(self, state: Mapping):
         """
@@ -300,6 +309,7 @@ class MarginalV1LPRunner(BaseMarginalV1Runner):
         click.echo(f"Marginal v1 state after swaps: {mrglv1_state_after}")
         liquidity_delta_fees = mrglv1_state_after.liquidity - mrglv1_state.liquidity
         click.echo(f"Liquidity gained from fee volume: {liquidity_delta_fees}")
+        self._net_liquidity_swap_fees_cumulative += liquidity_delta_fees
 
         fees0_delta, fees1_delta = get_mrglv1_amounts_for_liquidity(
             mrglv1_state_after.sqrtPriceX96,
@@ -640,6 +650,15 @@ class MarginalV1LPRunner(BaseMarginalV1Runner):
             self._blocks_settle[i] = number + self.blocks_held
             click.echo(f"Opened new position with tokenID {next_token_id}: {next_position}")
 
+            # estimate liquidity gains due to fees
+            reserve0, reserve1 = get_mrglv1_amounts_for_liquidity(mrglv1_state.sqrtPriceX96, mrglv1_state.liquidity)
+            fees0 = quote.fees if not zero_for_one else 0
+            fees1 = 0 if not zero_for_one else quote.fees
+            liquidity_after, _ = get_mrglv1_liquidity_sqrt_price_x96_from_reserves(reserve0 + fees0, reserve1 + fees1)
+            net_liquidity_open_fees = liquidity_after - mrglv1_state.liquidity
+            click.echo(f"Net liquidity gained from fees on opening position: {net_liquidity_open_fees}")
+            self._net_liquidity_position_fees_cumulative += net_liquidity_open_fees
+
         # simulate swaps for fee volume on mrgl v1
         self.simulate_swaps(state)
 
@@ -710,6 +729,8 @@ class MarginalV1LPRunner(BaseMarginalV1Runner):
             "_balances_pool",
             "_last_mrglv1_block_timestamp",
             "_last_mrglv1_tick_cumulative",
+            "_net_liquidity_swap_fees_cumulative",
+            "_net_liquidity_position_fees_cumulative",
         ]
         for name in attr_names:
             attr = getattr(self, name)

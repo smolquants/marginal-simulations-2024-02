@@ -22,6 +22,12 @@ def get_mrglv1_amounts_for_liquidity(sqrt_price_x96: int, liquidity: int) -> (in
     return (amount0, amount1)
 
 
+def get_mrglv1_liquidity_sqrt_price_x96_from_reserves(reserve0: int, reserve1: int) -> (int, int):
+    liquidity = int(sqrt(reserve0 * reserve1))
+    sqrt_price_x96 = (liquidity << 96) // reserve0
+    return (liquidity, sqrt_price_x96)
+
+
 def get_mrglv1_sqrt_price_x96_next_open(
     liquidity: int,
     sqrt_price_x96: int,
