@@ -36,6 +36,7 @@ class MarginalV1LPRunner(BaseMarginalV1Runner):
     _margins_outstanding: List[int] = [0, 0]
     _debts_outstanding: List[int] = [0, 0]  # with funding
     _debts_without_funding_outstanding: List[int] = [0, 0]
+    _funding_rates_outstanding: List[float] = [0.0, 0.0]
 
     _amounts0_locked: List[int] = [0, 0]
     _amounts1_locked: List[int] = [0, 0]
@@ -53,6 +54,11 @@ class MarginalV1LPRunner(BaseMarginalV1Runner):
     # indices: [token0, token1]
     _last_univ3_fee_growth_global_x128: List[int] = [-1, -1]
     _balances_pool: List[int] = [0, 0]
+
+    # mrgl v1 mock pool oracle state
+    _last_block_number: int = -1
+    _last_mrglv1_block_timestamp: int = -1
+    _last_mrglv1_tick_cumulative: int = -1
 
     @validator("leverage")
     def leverage_greater_than_one(cls, v, **kwargs):
@@ -101,15 +107,16 @@ class MarginalV1LPRunner(BaseMarginalV1Runner):
         liquidity_delta_10 = int((total_liquidity * self.utilization * (1 - self.skew)) // 2)
         return (liquidity_delta_01, liquidity_delta_10)
 
-    def get_positions_values(self) -> (List[int], List[int], List[int], List[int]):
+    def get_positions_values(self) -> (List[int], List[int], List[int], List[int], List[float]):
         """
         Gets the sizes, debts (with and without funding) and margins of the oustanding positions.
 
         Returns:
-            sizes_outstanding (List[int]): Position sizes for [zeroForOne=true, zeroForOne=false]o
+            sizes_outstanding (List[int]): Position sizes for [zeroForOne=true, zeroForOne=false]
             margins_outstanding (List[int]): Position margins for [zeroForOne=true, zeroForOne=false]
             debts_outstanding (List[int]): Position debts for [zeroForOne=true, zeroForOne=false]
             debts_without_funding_outstanding (List[int]): Position debts without funding (originally at open) for [zeroForOne=true, zeroForOne=false]
+            funding_rates_outstanding (List[float]): Position funding rates owed since open for [zeroForOne=true, zeroForOne=false]
         """
         mock_mrglv1_manager = self._mocks["mrglv1_manager"]
         mock_mrglv1_pool = self._mocks["mrglv1_pool"]
@@ -118,6 +125,7 @@ class MarginalV1LPRunner(BaseMarginalV1Runner):
         margins_outstanding = [0, 0]
         debts_outstanding = [0, 0]
         debts_without_funding_outstanding = [0, 0]
+        funding_rates_outstanding = [0.0, 0.0]
         for i, token_id in enumerate(self._token_ids):
             position = mock_mrglv1_manager.positions(token_id)
             key = get_mrglv1_position_key(mock_mrglv1_manager.address, position.positionId)
@@ -126,8 +134,15 @@ class MarginalV1LPRunner(BaseMarginalV1Runner):
             margins_outstanding[i] = position.margin
             debts_outstanding[i] = position.debt
             debts_without_funding_outstanding[i] = pposition.debt0 if position.zeroForOne else pposition.debt1
+            funding_rates_outstanding[i] = debts_outstanding[i] / debts_without_funding_outstanding[i] - 1.0
 
-        return (sizes_outstanding, margins_outstanding, debts_outstanding, debts_without_funding_outstanding)
+        return (
+            sizes_outstanding,
+            margins_outstanding,
+            debts_outstanding,
+            debts_without_funding_outstanding,
+            funding_rates_outstanding,
+        )
 
     def get_positions_amounts_locked(self) -> (List[int], List[int]):
         """
@@ -491,6 +506,17 @@ class MarginalV1LPRunner(BaseMarginalV1Runner):
         mock_mrglv1_quoter = self._mocks["mrglv1_quoter"]
         mock_mrglv1_pool = self._mocks["mrglv1_pool"]
 
+        # mine 12 seconds per block for funding to kick in
+        if self._last_block_number != -1:
+            click.echo(f"Last block number strategy updated: {self._last_block_number}")
+            click.echo(f"Next block number strategy updated: {number}")
+            dt = (number - self._last_block_number) * 12
+            click.echo(f"Time between strategy updates: {dt}")
+            click.echo(f"Mining {dt} seconds to catch up ..")
+            chain.mine(deltatime=dt)
+
+        self._last_block_number = number
+
         # simulate swaps for fee volume on mrgl v1
         self.simulate_swaps(state)
 
@@ -616,11 +642,17 @@ class MarginalV1LPRunner(BaseMarginalV1Runner):
             self._margins_outstanding,
             self._debts_outstanding,
             self._debts_without_funding_outstanding,
+            self._funding_rates_outstanding,
         ) = self.get_positions_values()
         self._amounts0_locked, self._amounts1_locked = self.get_positions_amounts_locked()
 
         # track mock token balances in pool
         self._balances_pool = [mock_token.balanceOf(mock_mrglv1_pool.address) for mock_token in mock_tokens]
+
+        # track mrgl v1 oracle state
+        mrglv1_state = mock_mrglv1_pool.state()
+        self._last_mrglv1_block_timestamp = mrglv1_state.blockTimestamp
+        self._last_mrglv1_tick_cumulative = mrglv1_state.tickCumulative
 
     def record(self, path: str, number: int, state: Mapping, values: List[int]):
         """
@@ -632,7 +664,7 @@ class MarginalV1LPRunner(BaseMarginalV1Runner):
             state (Mapping): The state of references at block number.
             values (List[int]): The value of the backtester for the state.
         """
-        data = {"number": number}
+        data = {"number": number, "timestamp": chain.blocks.head.timestamp}
         for i, value in enumerate(values):
             data[f"values{i}"] = value
 
@@ -647,7 +679,7 @@ class MarginalV1LPRunner(BaseMarginalV1Runner):
             }
         )
 
-        # all lists so unfold
+        # unfold if list
         attr_names = [
             "_token_ids",
             "_blocks_settle",
@@ -655,6 +687,7 @@ class MarginalV1LPRunner(BaseMarginalV1Runner):
             "_margins_outstanding",
             "_debts_outstanding",
             "_debts_without_funding_outstanding",
+            "_funding_rates_outstanding",
             "_amounts0_locked",
             "_amounts1_locked",
             "_positions_liquidated_cumulative",
@@ -664,10 +697,16 @@ class MarginalV1LPRunner(BaseMarginalV1Runner):
             "_net_liquidity_liquidated_cumulative",
             "_net_liquidity_settled_cumulative",
             "_balances_pool",
+            "_last_mrglv1_block_timestamp",
+            "_last_mrglv1_tick_cumulative",
         ]
         for name in attr_names:
-            cum_list = getattr(self, name)
-            for i, cum_val in enumerate(cum_list):
+            attr = getattr(self, name)
+            if not isinstance(attr, list):
+                data[name] = attr
+                continue
+
+            for i, cum_val in enumerate(attr):
                 data[f"{name}{i}"] = cum_val
 
         header = not os.path.exists(path)
