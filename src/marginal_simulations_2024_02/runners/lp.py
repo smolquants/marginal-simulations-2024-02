@@ -2,7 +2,7 @@ import click
 import os
 import pandas as pd
 
-from typing import ClassVar, List, Mapping, Optional
+from typing import ClassVar, List, Mapping, Optional, Tuple
 
 from ape import chain
 from ape.exceptions import ProviderError
@@ -53,10 +53,10 @@ class MarginalV1LPRunner(BaseMarginalV1Runner):
 
     # indices: [token0, token1]
     _last_univ3_fee_growth_global_x128: List[int] = [-1, -1]
+    _last_univ3_observation1: Tuple = (-1, -1, -1, -1)
     _balances_pool: List[int] = [0, 0]
 
     # mrgl v1 mock pool oracle state
-    _last_block_number: int = -1
     _last_mrglv1_block_timestamp: int = -1
     _last_mrglv1_tick_cumulative: int = -1
 
@@ -276,6 +276,9 @@ class MarginalV1LPRunner(BaseMarginalV1Runner):
         amount0_out = -receipt.decode_logs(mock_mrglv1_pool.Swap)[0].amount0
         click.echo(f"Swapped token1 amount in {amount1_in} for token0 amount out {amount0_out}.")
 
+        mrglv1_state_between = mock_mrglv1_pool.state()
+        click.echo(f"Marginal v1 state between swaps: {mrglv1_state_between}")
+
         # swap amount0 back (0 => 1)
         swap_params = (
             mock_tokens[0],
@@ -349,6 +352,7 @@ class MarginalV1LPRunner(BaseMarginalV1Runner):
         state["observation1"] = (timestamp, tick_cumulatives[0], seconds_per_liquidity_cumulatives[0], True)
 
         # try catch to avoid block out of range errors
+        prior_timestamp = timestamp - seconds_ago
         try:
             tick_cumulatives, seconds_per_liquidity_cumulatives = ref_univ3_pool.observe(
                 [seconds_ago], block_identifier=block_identifier
@@ -358,12 +362,14 @@ class MarginalV1LPRunner(BaseMarginalV1Runner):
                 f"Error on getting seconds ago from oracle observations at block {block_identifier}: {err}", blink=True
             )
             click.echo(f"Attempting rough approx with observe([0]) at block {block_identifier - seconds_ago // 12}")
+            prior_block_identifier = block_identifier - seconds_ago // 12
+            prior_timestamp = chain.blocks[prior_block_identifier].timestamp
             tick_cumulatives, seconds_per_liquidity_cumulatives = ref_univ3_pool.observe(
-                [0], block_identifier=(block_identifier - seconds_ago // 12)
+                [0], block_identifier=prior_block_identifier
             )
 
         state["observation0"] = (
-            timestamp - seconds_ago,
+            prior_timestamp,
             tick_cumulatives[0],
             seconds_per_liquidity_cumulatives[0],
             True,
@@ -507,18 +513,17 @@ class MarginalV1LPRunner(BaseMarginalV1Runner):
         mock_mrglv1_pool = self._mocks["mrglv1_pool"]
 
         # mine 12 seconds per block for funding to kick in
-        if self._last_block_number != -1:
-            click.echo(f"Last block number strategy updated: {self._last_block_number}")
-            click.echo(f"Next block number strategy updated: {number}")
-            dt = (number - self._last_block_number) * 12
+        if self._last_univ3_observation1[0] != -1:
+            last_oracle_timestamp = self._last_univ3_observation1[0]
+            next_oracle_timestamp = state["observation1"][0]
+            click.echo(f"Last oracle timestamp strategy updated: {last_oracle_timestamp}")
+            click.echo(f"Next oracle timestamp strategy updated: {next_oracle_timestamp}")
+            dt = next_oracle_timestamp - last_oracle_timestamp
             click.echo(f"Time between strategy updates: {dt}")
             click.echo(f"Mining {dt} seconds to catch up ..")
             chain.mine(deltatime=dt)
 
-        self._last_block_number = number
-
-        # simulate swaps for fee volume on mrgl v1
-        self.simulate_swaps(state)
+        self._last_univ3_observation1 = state["observation1"]
 
         # arbitrage univ3 and mrglv1 pools to close price gap
         self.arb_pools()
@@ -537,7 +542,9 @@ class MarginalV1LPRunner(BaseMarginalV1Runner):
             pposition = mock_mrglv1_pool.positions(
                 get_mrglv1_position_key(mock_mrglv1_manager.address, position.positionId)
             )
+            click.echo(f"Pool position status of tokenID {token_id}: {pposition}")
             mrglv1_state_before = mock_mrglv1_pool.state()
+            click.echo(f"Marginal v1 state from last update: {mrglv1_state_before}")
 
             # liquidate position if not safe
             if not position.safe:
@@ -633,6 +640,9 @@ class MarginalV1LPRunner(BaseMarginalV1Runner):
             self._blocks_settle[i] = number + self.blocks_held
             click.echo(f"Opened new position with tokenID {next_token_id}: {next_position}")
 
+        # simulate swaps for fee volume on mrgl v1
+        self.simulate_swaps(state)
+
         # arb pools again given potential positions opened if arb there
         self.arb_pools()
 
@@ -651,6 +661,7 @@ class MarginalV1LPRunner(BaseMarginalV1Runner):
 
         # track mrgl v1 oracle state
         mrglv1_state = mock_mrglv1_pool.state()
+        click.echo(f"Marginal v1 state after update: {mrglv1_state}")
         self._last_mrglv1_block_timestamp = mrglv1_state.blockTimestamp
         self._last_mrglv1_tick_cumulative = mrglv1_state.tickCumulative
 
