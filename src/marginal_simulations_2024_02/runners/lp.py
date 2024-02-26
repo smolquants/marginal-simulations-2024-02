@@ -24,6 +24,7 @@ class MarginalV1LPRunner(BaseMarginalV1Runner):
     utilization: float = 0  # = pool.liquidityLocked / pool.totalLiquidity
     skew: float = 0  # [-1, 1]: -1 is all utilization long, +1 is all short
     leverage: float = 1.1  # average leverage of positions on pool
+    rel_margin_above_safe_min: float = 0  # buffer above safe margin min if leverage not specified
     blocks_held: int = 7200  # average number of blocks positions held
     sqrt_price_tol: float = 0.0025  # sqrt price diff above which should arb pools
 
@@ -67,6 +68,12 @@ class MarginalV1LPRunner(BaseMarginalV1Runner):
     def leverage_greater_than_one(cls, v, **kwargs):
         if v <= 1:
             raise ValueError("leverage must be greater than 1")
+        return v
+
+    @validator("rel_margin_above_safe_min")
+    def rel_margin_above_safe_min_greater_than_or_equal_to_zero(cls, v, **kwargs):
+        if v < 0:
+            raise ValueError("rel buffer above safe margin minimum must be greater than or equal to zero")
         return v
 
     @validator("utilization")
@@ -620,10 +627,32 @@ class MarginalV1LPRunner(BaseMarginalV1Runner):
                 zero_for_one,
                 self.maintenance,
             )
-            margin = int(size_desired / (self.leverage - 1))
             click.echo(f"New position liquidity delta: {liquidity_delta}")
             click.echo(f"New position zeroForOne: {zero_for_one}")
             click.echo(f"New position sizeDesired: {size_desired}")
+            mint_params = (
+                mock_tokens[0].address,
+                mock_tokens[1].address,
+                self.maintenance,
+                mock_univ3_pool.address,
+                zero_for_one,
+                size_desired,
+                0,
+                0,
+                0,
+                0,
+                2**128 - 1,  # to avoid below safe margin min reverts
+                self.acc.address,
+                2**256 - 1,
+            )
+            quote = mock_mrglv1_quoter.quoteMint(mint_params)
+            click.echo(f"Quote for opening new position: {quote}")
+
+            margin = (
+                int(size_desired / (self.leverage - 1))
+                if self.rel_margin_above_safe_min == 0
+                else int(quote.safeMarginMinimum * (1 + self.rel_margin_above_safe_min))
+            )
             click.echo(f"New position margin: {margin}")
             mint_params = (
                 mock_tokens[0].address,
@@ -640,8 +669,6 @@ class MarginalV1LPRunner(BaseMarginalV1Runner):
                 self.acc.address,
                 2**256 - 1,
             )
-            quote = mock_mrglv1_quoter.quoteMint(mint_params)
-            click.echo(f"Quote for opening new position: {quote}")
             receipt = mock_mrglv1_manager.mint(mint_params, sender=self.acc, value=int(1e18))  # excess ETH in case
             next_token_id = receipt.decode_logs(mock_mrglv1_manager.Mint)[0].tokenId
             next_position = mock_mrglv1_manager.positions(next_token_id)

@@ -29,7 +29,7 @@ def main():
     runner_cls = getattr(marginal_simulations_2024_02, runner_cls_name)
 
     # prompt user for fields on runner to init with
-    skip_names = []
+    skip_names = ["leverage", "rel_margin_above_safe_min"]
     kwargs = {}
     for name, field in runner_cls.__fields__.items():
         if name in skip_names:
@@ -53,6 +53,13 @@ def main():
 
         kwargs[name] = value
 
+    # user choice for leverage specified or rel buffer above safe margin
+    lev_input = click.prompt(
+        "Input leverage or buffer above safe margin minimum?",
+        type=click.Choice(["leverage", "rel_margin_above_safe_min"], case_sensitive=False),
+    )
+    kwargs[lev_input] = click.prompt(f"{lev_input}", type=float)
+
     # setup runner
     runner = runner_cls(**kwargs)
     click.echo(f"Runner instance: {runner}")
@@ -64,7 +71,7 @@ def main():
     step = click.prompt("Step size", type=int, default=1)
 
     # remove file if already exists at path
-    path = f"notebook/results/{runner_cls_name}_{univ3_pool_addr}_{runner.maintenance}_{runner.utilization}_{runner.skew}_{runner.leverage}_{runner.blocks_held}_{runner.sqrt_price_tol}_{start}_{stop}_{step}.csv"
+    path = f"notebook/results/{runner_cls_name}_{univ3_pool_addr}_{runner.maintenance}_{runner.utilization}_{runner.skew}_{runner.leverage}_{runner.rel_margin_above_safe_min}_{runner.blocks_held}_{runner.sqrt_price_tol}_{start}_{stop}_{step}.csv"
     if os.path.exists(path):
         os.remove(path)
 
