@@ -369,7 +369,6 @@ class MarginalV1LPRunner(BaseMarginalV1Runner):
         state["observation1"] = (timestamp, tick_cumulatives[0], seconds_per_liquidity_cumulatives[0], True)
 
         # try catch to avoid block out of range errors
-        prior_timestamp = timestamp - seconds_ago
         try:
             tick_cumulatives, seconds_per_liquidity_cumulatives = ref_univ3_pool.observe(
                 [seconds_ago], block_identifier=block_identifier
@@ -385,8 +384,13 @@ class MarginalV1LPRunner(BaseMarginalV1Runner):
                 [0], block_identifier=prior_block_identifier
             )
 
+            # interpolate tick cumulatives if prior_timestamp != timestamp - seconds_ago given mock oracle
+            prior_tick = ref_univ3_pool.slot0(block_identifier=block_identifier).tick  # roughly
+            prior_dt = prior_timestamp - (timestamp - seconds_ago)
+            tick_cumulatives[0] -= prior_tick * prior_dt
+
         state["observation0"] = (
-            prior_timestamp,
+            timestamp - seconds_ago,
             tick_cumulatives[0],
             seconds_per_liquidity_cumulatives[0],
             True,
